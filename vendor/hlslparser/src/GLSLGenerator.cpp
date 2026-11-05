@@ -2069,6 +2069,12 @@ void GLSLGenerator::OutputEntryCaller(HLSLFunction* entryFunction)
     for(HLSLDeclaration *declaration : globalVarsAssignments)
     {
         m_writer.BeginLine(1, declaration->fileName, declaration->line);
+        if (declaration->type.array && !HasArrayConstructors())
+        {
+            OutputArrayElementAssignments(declaration);
+            m_writer.EndLine(";");
+            continue;
+        }
         OutputDeclarationBody( declaration->type, GetSafeIdentifierName( declaration->name ) );
 
         OutputDeclarationAssignment(declaration);
@@ -2136,18 +2142,36 @@ void GLSLGenerator::OutputDeclaration(HLSLDeclaration* declaration, const bool s
 	OutputDeclarationType( declaration->type );
 
 	HLSLDeclaration* lastDecl = nullptr;
+	bool lastDeclLoweredArray = false;
 	while( declaration )
 	{
-		if( lastDecl )
+		if( lastDeclLoweredArray )
+		{
+			// The element stores ended the declaration list, start a new one.
+			m_writer.Write( "; " );
+			OutputDeclarationType( declaration->type );
+		}
+		else if( lastDecl )
 			m_writer.Write( ", " );
 
-		OutputDeclarationBody( declaration->type, GetSafeIdentifierName( declaration->name ) );
+		bool lowerArrayInit = !HasArrayConstructors() && declaration->type.array && declaration->assignment != NULL;
+		if( lowerArrayInit && declaration->type.arraySize == NULL )
+		{
+			// There are no unsized arrays, take the size from the initializer.
+			m_writer.Write( "%s[%d]", GetSafeIdentifierName( declaration->name ), CountArrayElements( declaration ) );
+		}
+		else
+		{
+			OutputDeclarationBody( declaration->type, GetSafeIdentifierName( declaration->name ) );
+		}
 
+		lastDeclLoweredArray = false;
 		if( declaration->assignment != NULL )
 		{
             if (!skipAssignment)
             {
                 OutputDeclarationAssignment(declaration);
+                lastDeclLoweredArray = lowerArrayInit;
             }
             else
             {
@@ -2160,8 +2184,92 @@ void GLSLGenerator::OutputDeclaration(HLSLDeclaration* declaration, const bool s
 	}
 }
 
+static int GetComponentCount(const HLSLType& type)
+{
+    if (type.array || type.baseType < HLSLBaseType_FirstNumeric || type.baseType > HLSLBaseType_LastNumeric)
+    {
+        return 0;
+    }
+    const BaseTypeDescription& description = baseTypeDescriptions[type.baseType];
+    return description.numComponents * description.height;
+}
+
+static HLSLType GetArrayElementType(const HLSLType& arrayType)
+{
+    HLSLType elementType = arrayType;
+    elementType.array = false;
+    elementType.arraySize = NULL;
+    return elementType;
+}
+
+// HLSL allows flat initializer lists such as float4 a[2] = { 1, 2, 3, 4, 5, 6, 7, 8 }.
+// Returns the initializer after those that make up the array element starting at expression.
+static HLSLExpression* SkipArrayElementInitializer(HLSLExpression* expression, int elementComponents)
+{
+    int components = GetComponentCount(expression->expressionType);
+    expression = expression->nextExpression;
+    if (elementComponents == 0 || components == 0)
+    {
+        return expression;
+    }
+    while (expression != NULL && components < elementComponents)
+    {
+        components += GetComponentCount(expression->expressionType);
+        expression = expression->nextExpression;
+    }
+    return expression;
+}
+
+int GLSLGenerator::CountArrayElements(HLSLDeclaration* declaration)
+{
+    int const elementComponents = GetComponentCount(GetArrayElementType(declaration->type));
+    int count = 0;
+    for (HLSLExpression* expression = declaration->assignment; expression != NULL;
+         expression = SkipArrayElementInitializer(expression, elementComponents))
+    {
+        ++count;
+    }
+    return count;
+}
+
+void GLSLGenerator::OutputArrayElementAssignments(HLSLDeclaration* declaration)
+{
+    HLSLType const elementType = GetArrayElementType(declaration->type);
+    int const elementComponents = GetComponentCount(elementType);
+
+    int index = 0;
+    HLSLExpression* expression = declaration->assignment;
+    while (expression != NULL)
+    {
+        HLSLExpression* next = SkipArrayElementInitializer(expression, elementComponents);
+        m_writer.Write("%s%s[%d] = ", index > 0 ? "; " : "", GetSafeIdentifierName(declaration->name), index);
+        if (expression->nextExpression == next)
+        {
+            OutputExpression(expression, &elementType);
+        }
+        else
+        {
+            m_writer.Write("%s(", GetTypeName(elementType));
+            for (; expression != next; expression = expression->nextExpression)
+            {
+                OutputExpression(expression);
+                m_writer.Write(expression->nextExpression != next ? ", " : ")");
+            }
+        }
+        expression = next;
+        ++index;
+    }
+}
+
 void GLSLGenerator::OutputDeclarationAssignment(HLSLDeclaration* declaration)
 {
+   if( declaration->type.array && !HasArrayConstructors() )
+   {
+       // No array constructors or initializers: declare first, then store each element.
+       m_writer.Write( "; " );
+       OutputArrayElementAssignments( declaration );
+       return;
+   }
    m_writer.Write( " = " );
    if( declaration->type.array )
    {

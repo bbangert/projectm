@@ -79,6 +79,8 @@ private:
 
     /// GLSL 1.10 and GLSL ES 1.00 only have square matrices.
     bool HasNonSquareMatrices() const { return m_version != Version_110 && m_version != Version_100_ES; }
+    /// GLSL 1.10 and GLSL ES 1.00 have neither array constructors nor array initializers.
+    bool HasArrayConstructors() const { return m_version != Version_110 && m_version != Version_100_ES; }
 
     void OutputExtensions();
     void OutputExpressionList(HLSLExpression* expression, HLSLArgument* argument = NULL);
@@ -100,6 +102,8 @@ private:
 	void OutputDeclarationBody( const HLSLType& type, const char* name );
     void OutputDeclaration(const HLSLType& type, const char* name);
     void OutputDeclarationAssignment(HLSLDeclaration* declaration);
+    void OutputArrayElementAssignments(HLSLDeclaration* declaration);
+    static int CountArrayElements(HLSLDeclaration* declaration);
     void OutputCast(const HLSLType& type);
 
     void OutputSetOutAttribute(const char* semantic, const char* resultName);
