@@ -383,6 +383,15 @@ void MilkdropShader::PreprocessPresetShader(std::string& program)
     {
         if (m_type == ShaderType::WarpShader)
         {
+#ifdef USE_GLES2
+            // GLES 2 has a single color output, so the warp shader writes no motion vector u/v coords.
+            program.replace(int(found), 11, R"(
+void PS(float4 _vDiffuse : COLOR,
+        float4 _uv : TEXCOORD0,
+        float2 _rad_ang : TEXCOORD1,
+        out float4 _return_value : COLOR0)
+)");
+#else
             program.replace(int(found), 11, R"(
 void PS(float4 _vDiffuse : COLOR,
         float4 _uv : TEXCOORD0,
@@ -390,6 +399,7 @@ void PS(float4 _vDiffuse : COLOR,
         out float4 _return_value : COLOR0,
         out float4 _mv_tex_coords : COLOR1)
 )");
+#endif
         }
         else
         {
@@ -412,10 +422,12 @@ void PS(float4 _vDiffuse : COLOR,
     if (found != std::string::npos)
     {
         std::string progMain = "{\nfloat3 ret = 0;\n";
+#ifndef USE_GLES2
         if (m_type == ShaderType::WarpShader)
         {
             progMain.append("_mv_tex_coords.xy = _uv.xy;\n");
         }
+#endif
         program.replace(int(found), 1, progMain);
     }
     else
