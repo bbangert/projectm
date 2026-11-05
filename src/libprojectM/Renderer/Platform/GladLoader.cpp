@@ -6,6 +6,7 @@
 #include "GLResolver.hpp"
 #include "Logging.hpp"
 
+#include <cstdlib>
 #include <string>
 
 namespace {
@@ -231,8 +232,12 @@ auto GladLoader::VerifyGLES2EntryPoints() -> bool
     }
 
     // Sampler objects: optional. Without them, sampler state is applied per texture.
+    // PROJECTM_GLES2_NO_SAMPLER_OBJECTS=1 forces that fallback, for testing it on drivers that have them.
+    const char* noSamplerObjects = std::getenv("PROJECTM_GLES2_NO_SAMPLER_OBJECTS");
+    const bool samplersDisabled = noSamplerObjects != nullptr && std::string(noSamplerObjects) == "1";
     const char* samplerSource = coreOrExt ? coreOrExt : (GLAD_GL_MESA_sampler_objects ? "GL_MESA_sampler_objects" : nullptr);
-    bool samplersUsable = samplerSource != nullptr &&
+    bool samplersUsable = !samplersDisabled &&
+                          samplerSource != nullptr &&
                           glad_glGenSamplers != nullptr &&
                           glad_glDeleteSamplers != nullptr &&
                           glad_glBindSampler != nullptr &&
@@ -252,7 +257,10 @@ auto GladLoader::VerifyGLES2EntryPoints() -> bool
     LOG_INFO(std::string("[GladLoader] GLES2   vertex arrays via ") + vaoSource +
              "; sampler objects " +
              (samplersUsable ? std::string("via ") + samplerSource
-                             : std::string("unavailable (") + (samplerSource ? std::string(samplerSource) + " entry points did not resolve or failed" : std::string("no GL_MESA_sampler_objects")) +
+                             : std::string("unavailable (") +
+                                   (samplersDisabled ? std::string("disabled by PROJECTM_GLES2_NO_SAMPLER_OBJECTS")
+                                    : samplerSource  ? std::string(samplerSource) + " entry points did not resolve or failed"
+                                                     : std::string("no GL_MESA_sampler_objects")) +
                                    "), falling back to per-texture sampler state"));
 
     return true;
