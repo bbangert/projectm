@@ -29,6 +29,7 @@ option(ENABLE_VERBOSE_LOGGING "Enables TRACE and DEBUG logging even in release b
 
 option(BUILD_TESTING "Build the libprojectM test suite" OFF)
 option(ENABLE_GLES_SMOKE_TEST "Build the headless EGL/OpenGL ES runtime smoke test. Requires ENABLE_GLES." OFF)
+option(BUILD_TRANSLATOR_HARNESS "Build the host-only preset shader translator harness in tests/translator" OFF)
 option(BUILD_DOCS "Build documentation" OFF)
 
 # Enable vcpkg manifest features according to the build options set
@@ -238,6 +239,10 @@ if(ENABLE_GLES_SMOKE_TEST)
     add_subdirectory(tests/gles-smoke)
 endif()
 
+if(BUILD_TRANSLATOR_HARNESS)
+    add_subdirectory(tests/translator)
+endif()
+
 message(STATUS "")
 message(STATUS "libprojectM v${PROJECT_VERSION}")
 message(STATUS "==============================================")
@@ -287,6 +292,7 @@ message(STATUS "    Playlist library:            ${ENABLE_PLAYLIST}")
 message(STATUS "    SDL2 Test UI:                ${ENABLE_SDL_UI}")
 message(STATUS "    Tests:                       ${BUILD_TESTING}")
 message(STATUS "    GLES runtime smoke test:     ${ENABLE_GLES_SMOKE_TEST}")
+message(STATUS "    Translator harness:          ${BUILD_TRANSLATOR_HARNESS}")
 message(STATUS "    Documentation:               ${BUILD_DOCS}")
 message(STATUS "")
 
