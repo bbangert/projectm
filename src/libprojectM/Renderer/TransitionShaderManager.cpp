@@ -28,24 +28,36 @@ auto TransitionShaderManager::RandomTransition() -> std::shared_ptr<Shader>
 
 auto TransitionShaderManager::CompileTransitionShader(const std::string& shaderBodyCode) -> std::shared_ptr<Shader>
 {
-#ifdef USE_GLES
+#if defined(USE_GLES2)
+    // GLSL ES 1.00 has no default float precision in fragment shaders and no 3D samplers.
+    constexpr char versionHeader[] = "#version 100\n\nprecision mediump float;\n";
+    const std::string& vertexShader = kTransitionVertexShaderGlsl100;
+    const std::string& headerSource = kTransitionShaderHeaderGlsl100;
+    const std::string& mainSource = kTransitionShaderMainGlsl100;
+#elif defined(USE_GLES)
     // GLES also requires a precision specifier for variables and 3D samplers
     constexpr char versionHeader[] = "#version 300 es\n\nprecision mediump float;\nprecision mediump sampler3D;\n";
+    const std::string& vertexShader = kTransitionVertexShaderGlsl330;
+    const std::string& headerSource = kTransitionShaderHeaderGlsl330;
+    const std::string& mainSource = kTransitionShaderMainGlsl330;
 #else
     constexpr char versionHeader[] = "#version 330\n\n";
+    const std::string& vertexShader = kTransitionVertexShaderGlsl330;
+    const std::string& headerSource = kTransitionShaderHeaderGlsl330;
+    const std::string& mainSource = kTransitionShaderMainGlsl330;
 #endif
 
     std::string fragmentShaderSource(static_cast<const char*>(versionHeader));
-    fragmentShaderSource.append(kTransitionShaderHeaderGlsl330);
+    fragmentShaderSource.append(headerSource);
     fragmentShaderSource.append("\n");
     fragmentShaderSource.append(shaderBodyCode);
     fragmentShaderSource.append("\n");
-    fragmentShaderSource.append(kTransitionShaderMainGlsl330);
+    fragmentShaderSource.append(mainSource);
 
     try
     {
         auto transitionShader = std::make_shared<Shader>();
-        transitionShader->CompileProgram(static_cast<const char*>(versionHeader) + kTransitionVertexShaderGlsl330, fragmentShaderSource);
+        transitionShader->CompileProgram(static_cast<const char*>(versionHeader) + vertexShader, fragmentShaderSource);
         return transitionShader;
     }
     catch (const ShaderException&)

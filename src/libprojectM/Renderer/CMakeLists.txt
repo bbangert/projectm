@@ -1,3 +1,4 @@
+# The built-in transition bodies are shared by all GLSL variants, see the GLSL ES 1.00 header.
 set(TRANSITION_SHADER_FILES
         TransitionShaders/TransitionShaderBuiltInCircleGlsl330.frag
         TransitionShaders/TransitionShaderBuiltInPlasmaGlsl330.frag
@@ -5,18 +6,40 @@ set(TRANSITION_SHADER_FILES
         TransitionShaders/TransitionShaderBuiltInSweepGlsl330.frag
         TransitionShaders/TransitionShaderBuiltInWarpGlsl330.frag
         TransitionShaders/TransitionShaderBuiltInZoomBlurGlsl330.frag
-        TransitionShaders/TransitionVertexShaderGlsl330.vert
-        TransitionShaders/TransitionShaderHeaderGlsl330.frag
-        TransitionShaders/TransitionShaderMainGlsl330.frag
         )
+
+if(USE_GLES2)
+    list(APPEND TRANSITION_SHADER_FILES
+            TransitionShaders/TransitionVertexShaderGlsl100.vert
+            TransitionShaders/TransitionShaderHeaderGlsl100.frag
+            TransitionShaders/TransitionShaderMainGlsl100.frag
+            )
+else()
+    list(APPEND TRANSITION_SHADER_FILES
+            TransitionShaders/TransitionVertexShaderGlsl330.vert
+            TransitionShaders/TransitionShaderHeaderGlsl330.frag
+            TransitionShaders/TransitionShaderMainGlsl330.frag
+            )
+endif()
 
 include(GenerateShaderResources)
 generate_shader_resources(${CMAKE_CURRENT_BINARY_DIR}/BuiltInTransitionsResources.hpp
         ${TRANSITION_SHADER_FILES}
         )
 
+set(RENDERER_SHADER_RESOURCES ${CMAKE_CURRENT_BINARY_DIR}/BuiltInTransitionsResources.hpp)
+
+if(USE_GLES2)
+    # The GLSL 3.30 / ES 3.00 copy shaders are inline in CopyTexture.cpp.
+    generate_shader_resources(${CMAKE_CURRENT_BINARY_DIR}/CopyTextureShaders.hpp
+            Shaders/CopyTextureVertexShaderGlsl100.vert
+            Shaders/CopyTextureFragmentShaderGlsl100.frag
+            )
+    list(APPEND RENDERER_SHADER_RESOURCES ${CMAKE_CURRENT_BINARY_DIR}/CopyTextureShaders.hpp)
+endif()
+
 add_library(Renderer OBJECT
-        ${CMAKE_CURRENT_BINARY_DIR}/BuiltInTransitionsResources.hpp
+        ${RENDERER_SHADER_RESOURCES}
         BlendMode.cpp
         BlendMode.hpp
         Color.hpp
