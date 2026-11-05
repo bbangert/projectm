@@ -169,6 +169,7 @@ private:
     char                m_sinCosFunction[64];
     char                m_bvecTernary[64];
     char                m_modfFunction[64];
+    char                m_roundFunction[64];
     char                m_acosFunction[64];
     char                m_asinFunction[64];
     char                m_altMultFunction[64];

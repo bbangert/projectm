@@ -139,6 +139,7 @@ GLSLGenerator::GLSLGenerator() :
     m_sinCosFunction[0]         = 0;
     m_bvecTernary[0]            = 0;
     m_modfFunction[0]           = 0;
+    m_roundFunction[0]          = 0;
     m_acosFunction[0]           = 0;
     m_asinFunction[0]           = 0;
     m_altMultFunction[0]        = 0;
@@ -169,6 +170,7 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
     ChooseUniqueName("texCUBEbias", m_texCUBEbiasFunction, sizeof(m_texCUBEbiasFunction));
 	ChooseUniqueName( "texCUBElod", m_texCUBElodFunction, sizeof( m_texCUBElodFunction ) );
 	ChooseUniqueName( "modf", m_modfFunction, sizeof( m_modfFunction ) );
+	ChooseUniqueName( "round", m_roundFunction, sizeof( m_roundFunction ) );
 	ChooseUniqueName( "acos", m_acosFunction, sizeof( m_acosFunction ) );
 	ChooseUniqueName( "asin", m_asinFunction, sizeof( m_asinFunction ) );
 	ChooseUniqueName( "mult", m_altMultFunction, sizeof( m_altMultFunction ) );
@@ -418,6 +420,14 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
         } else {
             m_writer.WriteLine(0, "float %s(float x, out float ip) { return modf(x, ip); }", m_modfFunction);
         }
+    }
+    // round() only exists from GLSL 1.30 and GLSL ES 3.00 on.
+    if (m_versionLegacy && m_tree->NeedsFunction("round"))
+    {
+        m_writer.WriteLine(0, "float %s(float x) { return floor(x + 0.5); }", m_roundFunction);
+        m_writer.WriteLine(0, "vec2 %s(vec2 x) { return floor(x + 0.5); }", m_roundFunction);
+        m_writer.WriteLine(0, "vec3 %s(vec3 x) { return floor(x + 0.5); }", m_roundFunction);
+        m_writer.WriteLine(0, "vec4 %s(vec4 x) { return floor(x + 0.5); }", m_roundFunction);
     }
     if (m_tree->NeedsFunction("acos"))
     {
@@ -1248,6 +1258,10 @@ void GLSLGenerator::OutputIdentifier(const char* name)
     else if (String_Equal(name, "acos"))
     {
         name = m_acosFunction;
+    }
+    else if (m_versionLegacy && String_Equal(name, "round"))
+    {
+        name = m_roundFunction;
     }
     else if (String_Equal(name, "asin"))
     {
