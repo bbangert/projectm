@@ -414,7 +414,7 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
     {
         if (m_version == Version_110 || m_version == Version_120 || m_version == Version_100_ES)
         {
-            m_writer.WriteLine(0, "float %s(float x, out float ip) { ip = int(x); return x - ip; }", m_modfFunction);
+            m_writer.WriteLine(0, "float %s(float x, out float ip) { ip = x < 0.0 ? ceil(x) : floor(x); return x - ip; }", m_modfFunction);
         } else {
             m_writer.WriteLine(0, "float %s(float x, out float ip) { return modf(x, ip); }", m_modfFunction);
         }
