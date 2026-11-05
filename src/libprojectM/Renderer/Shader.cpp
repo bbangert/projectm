@@ -256,7 +256,14 @@ void Shader::SetUniformMat3x4(const char* uniform, const glm::mat3x4& values) co
     {
         return;
     }
+#ifdef USE_GLES2
+    // GLES 2 has no non-square matrices. The uniform is declared mat4 there, holding the three
+    // columns of the mat3x4 and a zero fourth column.
+    const glm::mat4x4 padded(values[0], values[1], values[2], glm::vec4(0.0f));
+    glUniformMatrix4fv(location, 1, GL_FALSE, glm::value_ptr(padded));
+#else
     glUniformMatrix3x4fv(location, 1, GL_FALSE, glm::value_ptr(values));
+#endif
 }
 
 void Shader::SetUniformMat4x4(const char* uniform, const glm::mat4x4& values) const
