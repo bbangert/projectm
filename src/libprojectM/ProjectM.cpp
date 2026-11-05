@@ -189,10 +189,14 @@ void ProjectM::RenderFrame(uint32_t targetFramebufferObject /*= 0*/)
     // ToDo: Call the to-be-implemented render method in Renderer
     m_activePreset->RenderFrame(audioData, renderContext);
 
+#ifdef USE_GLES2
+    glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(targetFramebufferObject));
+#else
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(targetFramebufferObject));
+#endif
     glViewport(0, 0, renderContext.viewportSizeX, renderContext.viewportSizeY);
 
-#ifdef USE_GLES
+#if defined(USE_GLES) && !defined(USE_GLES2)
     // On WebGL2 / Chrome ANGLE, the default framebuffer's draw buffer must
     // be explicitly set to GL_BACK after preset rendering, which may leave
     // per-FBO draw buffer state that leaks into FBO 0 on some drivers.

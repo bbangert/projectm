@@ -285,7 +285,11 @@ void MilkdropSprite::Draw(const Audio::FrameAudioData& audioData,
         }
 
         // Reset to original FBO
+#ifdef USE_GLES2
+        glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(outputFramebufferObject));
+#else
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(outputFramebufferObject));
+#endif
     }
 
     m_texture->Unbind(0);
