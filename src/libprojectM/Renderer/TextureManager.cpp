@@ -416,10 +416,19 @@ uint32_t TextureManager::TextureFormatFromChannels(int channels)
 {
     switch (channels)
     {
+#ifdef USE_GLES2
+        // GLES 2 has no GL_RED/GL_RG textures. Luminance replicates the channel into RGB, which
+        // is how Direct3D/Milkdrop presents single-channel images.
+        case 1:
+            return GL_LUMINANCE;
+        case 2:
+            return GL_LUMINANCE_ALPHA;
+#else
         case 1:
             return GL_RED;
         case 2:
             return GL_RG;
+#endif
         case 3:
             return GL_RGB;
         case 4:

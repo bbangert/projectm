@@ -1,9 +1,40 @@
 #include "Renderer/Texture.hpp"
 
+#ifdef USE_GLES2
+#include <Logging.hpp>
+#endif
+
 #include <utility>
 
 namespace libprojectM {
 namespace Renderer {
+
+#ifdef USE_GLES2
+namespace {
+
+/**
+ * GLES 2 has no 3D textures. Textures with any target other than GL_TEXTURE_2D are never allocated
+ * or bound, so shaders sampling them read an incomplete texture.
+ * TODO(es2): store the noise volumes as 2D slice atlases instead.
+ */
+auto TargetSupported(GLenum target) -> bool
+{
+    if (target == GL_TEXTURE_2D)
+    {
+        return true;
+    }
+
+    static bool loggedUnsupported = false;
+    if (!loggedUnsupported)
+    {
+        LOG_WARN("[Texture] 3D textures are not supported on OpenGL ES 2.0; the noise volumes are left empty.");
+        loggedUnsupported = true;
+    }
+    return false;
+}
+
+} // namespace
+#endif
 
 Texture::Texture(std::string name, const int width, const int height, const bool isUserTexture)
     : m_target(GL_TEXTURE_2D)
@@ -71,6 +102,12 @@ Texture::~Texture()
 
 void Texture::Bind(GLint slot, const Sampler::Ptr& sampler) const
 {
+#ifdef USE_GLES2
+    if (!TargetSupported(m_target))
+    {
+        return;
+    }
+#endif
     glActiveTexture(GL_TEXTURE0 + slot);
     glBindTexture(m_target, m_textureId);
 
@@ -82,6 +119,12 @@ void Texture::Bind(GLint slot, const Sampler::Ptr& sampler) const
 
 void Texture::Unbind(GLint slot) const
 {
+#ifdef USE_GLES2
+    if (!TargetSupported(m_target))
+    {
+        return;
+    }
+#endif
     glActiveTexture(GL_TEXTURE0 + slot);
     glBindTexture(m_target, 0);
 }
@@ -128,15 +171,23 @@ auto Texture::Empty() const -> bool
 
 void Texture::Update(const void* data) const
 {
+#ifdef USE_GLES2
+    if (!TargetSupported(m_target))
+    {
+        return;
+    }
+#endif
     glBindTexture(m_target, m_textureId);
     switch (m_target)
     {
         case GL_TEXTURE_2D:
             glTexImage2D(m_target, 0, m_internalFormat, m_width, m_height, 0, m_format, m_type, data);
             break;
+#ifndef USE_GLES2
         case GL_TEXTURE_3D:
             glTexImage3D(m_target, 0, m_internalFormat, m_width, m_height, m_depth, 0, m_format, m_type, data);
             break;
+#endif
         default:
             // Unsupported, do nothing.
             break;
@@ -147,15 +198,23 @@ void Texture::Update(const void* data) const
 void Texture::CreateNewTexture()
 {
     glGenTextures(1, &m_textureId);
+#ifdef USE_GLES2
+    if (!TargetSupported(m_target))
+    {
+        return;
+    }
+#endif
     glBindTexture(m_target, m_textureId);
     switch (m_target)
     {
         case GL_TEXTURE_2D:
             glTexImage2D(m_target, 0, m_internalFormat, m_width, m_height, 0, m_format, m_type, nullptr);
             break;
+#ifndef USE_GLES2
         case GL_TEXTURE_3D:
             glTexImage3D(m_target, 0, m_internalFormat, m_width, m_height, m_depth, 0, m_format, m_type, nullptr);
             break;
+#endif
         default:
             // Unsupported, do nothing.
             break;

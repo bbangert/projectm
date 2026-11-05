@@ -12,22 +12,22 @@ namespace Renderer {
 
 auto MilkdropNoise::LowQuality() -> std::shared_ptr<Texture>
 {
-    return std::make_shared<Texture>("noise_lq", generate2D(256, 1).data(), GL_TEXTURE_2D, 256, 256, 0, GL_RGBA8, GetPreferredInternalFormat(), GL_UNSIGNED_BYTE, false);
+    return std::make_shared<Texture>("noise_lq", generate2D(256, 1).data(), GL_TEXTURE_2D, 256, 256, 0, GetSizedInternalFormat(), GetPreferredInternalFormat(), GL_UNSIGNED_BYTE, false);
 }
 
 auto MilkdropNoise::LowQualityLite() -> std::shared_ptr<Texture>
 {
-    return std::make_shared<Texture>("noise_lq_lite", generate2D(32, 1).data(), GL_TEXTURE_2D, 32, 32, 0, GL_RGBA8, GetPreferredInternalFormat(), GL_UNSIGNED_BYTE, false);
+    return std::make_shared<Texture>("noise_lq_lite", generate2D(32, 1).data(), GL_TEXTURE_2D, 32, 32, 0, GetSizedInternalFormat(), GetPreferredInternalFormat(), GL_UNSIGNED_BYTE, false);
 }
 
 auto MilkdropNoise::MediumQuality() -> std::shared_ptr<Texture>
 {
-    return std::make_shared<Texture>("noise_mq", generate2D(256, 4).data(), GL_TEXTURE_2D, 256, 256, 0, GL_RGBA8, GetPreferredInternalFormat(), GL_UNSIGNED_BYTE, false);
+    return std::make_shared<Texture>("noise_mq", generate2D(256, 4).data(), GL_TEXTURE_2D, 256, 256, 0, GetSizedInternalFormat(), GetPreferredInternalFormat(), GL_UNSIGNED_BYTE, false);
 }
 
 auto MilkdropNoise::HighQuality() -> std::shared_ptr<Texture>
 {
-    return std::make_shared<Texture>("noise_hq", generate2D(256, 8).data(), GL_TEXTURE_2D, 256, 256, 0, GL_RGBA8, GetPreferredInternalFormat(), GL_UNSIGNED_BYTE, false);
+    return std::make_shared<Texture>("noise_hq", generate2D(256, 8).data(), GL_TEXTURE_2D, 256, 256, 0, GetSizedInternalFormat(), GetPreferredInternalFormat(), GL_UNSIGNED_BYTE, false);
 }
 
 auto MilkdropNoise::LowQualityVolume() -> std::shared_ptr<Texture>
@@ -48,6 +48,16 @@ auto MilkdropNoise::GetPreferredInternalFormat() -> int
 #else
     // GLES only supports GL_RGB and GL_RGBA, so we always use the latter.
     return GL_RGBA;
+#endif
+}
+
+auto MilkdropNoise::GetSizedInternalFormat() -> int
+{
+#ifdef USE_GLES2
+    // GLES 2 requires the internal format to equal the pixel format.
+    return GL_RGBA;
+#else
+    return GL_RGBA8;
 #endif
 }
 
