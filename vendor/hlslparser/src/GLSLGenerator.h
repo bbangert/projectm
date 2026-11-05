@@ -44,6 +44,32 @@ public:
         Flag_PackMatrixRowMajor = 1 << 2,
         Flag_LowerMatrixMultiplication = 1 << 3,
         Flag_AlternateNanPropagation = 1 << 4,
+        /// GLSL 1.x / ES 1.00: sample the base level for tex2Dlod, tex2Dgrad and texCUBElod instead of
+        /// requiring a texture LOD extension. Exact for textures without mipmaps.
+        Flag_NoTextureLod = 1 << 5,
+        /// GLSL ES 1.00: fail when ddx, ddy or fwidth are used instead of requiring
+        /// GL_OES_standard_derivatives.
+        Flag_NoDerivatives = 1 << 6,
+        /// Targets without 3D textures: sampler3D is declared as sampler2D and tex3D/tex3Dlod sample
+        /// a 2D atlas of the volume's slices instead, see Texture3DAtlas.
+        Flag_Texture3DAtlas = 1 << 7,
+    };
+
+    /// Layout of the atlas used with Flag_Texture3DAtlas. Slice z of a VolumeSize^3 volume is the
+    /// tile at column z % TileColumns, row z / TileColumns (in texture coordinate order). Each tile
+    /// holds the slice with a one-texel border copied from the opposite edges, so bilinear filtering
+    /// inside a tile wraps like GL_REPEAT. tex3D does two bilinear taps (the slices next to p.z) and
+    /// interpolates between them, which matches trilinear filtering of the volume with GL_REPEAT.
+    struct Texture3DAtlas
+    {
+        enum
+        {
+            VolumeSize = 32,
+            TileColumns = 8,
+            TileSize = VolumeSize + 2,
+            Width = TileSize * TileColumns,
+            Height = TileSize * (VolumeSize / TileColumns),
+        };
     };
 
     struct Options
@@ -171,6 +197,7 @@ private:
     char                m_tex2DbiasFunction[64];
     char                m_tex2DgradFunction[64];
     char                m_tex3DlodFunction[64];
+    char                m_tex3DAtlasFunction[64];
     char                m_texCUBEbiasFunction[64];
     char                m_texCUBElodFunction[64];
     char                m_scalarSwizzle2Function[64];

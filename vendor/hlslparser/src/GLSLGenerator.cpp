@@ -126,6 +126,10 @@ const char* GLSLGenerator::GetTypeName(const HLSLType& type) const
     {
         return GetSquareMatrixTypeName(GetPaddedMatrixSize(type));
     }
+    if ((m_options.flags & Flag_Texture3DAtlas) && type.baseType == HLSLBaseType_Sampler3D)
+    {
+        return "sampler2D";
+    }
     return GetGLSLTypeName(type);
 }
 
@@ -173,6 +177,7 @@ GLSLGenerator::GLSLGenerator() :
     m_tex2DlodFunction[0]       = 0;
     m_tex2DbiasFunction[0]      = 0;
     m_tex3DlodFunction[0]       = 0;
+    m_tex3DAtlasFunction[0]     = 0;
     m_texCUBEbiasFunction[0]    = 0;
     m_texCUBElodFunction[0]     = 0;
     m_scalarSwizzle2Function[0] = 0;
@@ -209,6 +214,7 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
     ChooseUniqueName("tex2Dbias", m_tex2DbiasFunction, sizeof(m_tex2DbiasFunction));
     ChooseUniqueName("tex2Dgrad", m_tex2DgradFunction, sizeof(m_tex2DgradFunction));
     ChooseUniqueName("tex3Dlod", m_tex3DlodFunction, sizeof(m_tex3DlodFunction));
+    ChooseUniqueName("tex3Datlas", m_tex3DAtlasFunction, sizeof(m_tex3DAtlasFunction));
     ChooseUniqueName("texCUBEbias", m_texCUBEbiasFunction, sizeof(m_texCUBEbiasFunction));
 	ChooseUniqueName( "texCUBElod", m_texCUBElodFunction, sizeof( m_texCUBElodFunction ) );
 	ChooseUniqueName( "modf", m_modfFunction, sizeof( m_modfFunction ) );
@@ -251,6 +257,13 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
     if (entryFunction == NULL)
     {
         Error("Entry point '%s' doesn't exist", m_entryName);
+        return false;
+    }
+
+    if ((m_options.flags & Flag_NoDerivatives) &&
+        (m_tree->NeedsFunction("ddx") || m_tree->NeedsFunction("ddy") || m_tree->NeedsFunction("fwidth")))
+    {
+        Error("ddx/ddy/fwidth need screen-space derivatives, which the target does not support");
         return false;
     }
 
@@ -362,7 +375,12 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
     }
 
     // Output the special function used to emulate tex2Dlod.
-    if (m_tree->NeedsFunction("tex2Dlod"))
+    bool const baseLevelOnly = m_versionLegacy && (m_options.flags & Flag_NoTextureLod);
+    if (m_tree->NeedsFunction("tex2Dlod") && baseLevelOnly)
+    {
+        m_writer.WriteLine(0, "vec4 %s(sampler2D samp, vec4 texCoord) { return texture2D(samp, texCoord.xy);  }", m_tex2DlodFunction);
+    }
+    else if (m_tree->NeedsFunction("tex2Dlod"))
     {
         const char* function = "textureLod";
 
@@ -379,7 +397,11 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
     }
 
     // Output the special function used to emulate tex2Dgrad.
-    if (m_tree->NeedsFunction("tex2Dgrad"))
+    if (m_tree->NeedsFunction("tex2Dgrad") && baseLevelOnly)
+    {
+        m_writer.WriteLine(0, "vec4 %s(sampler2D samp, vec2 texCoord, vec2 dx, vec2 dy) { return texture2D(samp, texCoord);  }", m_tex2DgradFunction);
+    }
+    else if (m_tree->NeedsFunction("tex2Dgrad"))
     {
         const char* function = "textureGrad";
 
@@ -417,8 +439,32 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
         m_writer.WriteLine(0, "}");
     }
 
+    // Output the special functions used to sample a 3D texture stored as a 2D atlas.
+    if ((m_options.flags & Flag_Texture3DAtlas) && (m_tree->NeedsFunction("tex3D") || m_tree->NeedsFunction("tex3Dlod")))
+    {
+        typedef Texture3DAtlas Atlas;
+        const char* sample = m_versionLegacy ? "texture2D" : "texture";
+        m_writer.WriteLine(0, "vec4 %s(sampler2D s, vec3 p) {", m_tex3DAtlasFunction);
+        m_writer.WriteLine(1, "p = fract(p);");
+        m_writer.WriteLine(1, "float z = p.z * %d.0 - 0.5;", Atlas::VolumeSize);
+        m_writer.WriteLine(1, "float z0 = floor(z);");
+        m_writer.WriteLine(1, "float s0 = mod(z0 + %d.0, %d.0);", Atlas::VolumeSize, Atlas::VolumeSize);
+        m_writer.WriteLine(1, "float s1 = mod(z0 + 1.0, %d.0);", Atlas::VolumeSize);
+        m_writer.WriteLine(1, "vec2 t0 = vec2(mod(s0, %d.0), floor(s0 / %d.0));", Atlas::TileColumns, Atlas::TileColumns);
+        m_writer.WriteLine(1, "vec2 t1 = vec2(mod(s1, %d.0), floor(s1 / %d.0));", Atlas::TileColumns, Atlas::TileColumns);
+        m_writer.WriteLine(1, "vec2 uv = p.xy * %d.0 + 1.0;", Atlas::VolumeSize);
+        m_writer.WriteLine(1, "vec2 scale = vec2(1.0 / %d.0, 1.0 / %d.0);", Atlas::Width, Atlas::Height);
+        m_writer.WriteLine(1, "return mix(%s(s, (t0 * %d.0 + uv) * scale), %s(s, (t1 * %d.0 + uv) * scale), z - z0);",
+                           sample, Atlas::TileSize, sample, Atlas::TileSize);
+        m_writer.WriteLine(0, "}");
+    }
+
     // Output the special function used to emulate tex3Dlod.
-    if (m_tree->NeedsFunction("tex3Dlod"))
+    if (m_tree->NeedsFunction("tex3Dlod") && (m_options.flags & Flag_Texture3DAtlas))
+    {
+        m_writer.WriteLine(0, "vec4 %s(sampler2D samp, vec4 texCoord) { return %s(samp, texCoord.xyz);  }", m_tex3DlodFunction, m_tex3DAtlasFunction);
+    }
+    else if (m_tree->NeedsFunction("tex3Dlod"))
     {
         m_writer.WriteLine(0, "vec4 %s(sampler3D samp, vec4 texCoord) { return %s(samp, texCoord.xyz, texCoord.w);  }", m_tex3DlodFunction, m_versionLegacy ? "texture3D" : "texture" );
     }
@@ -438,7 +484,11 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
     }
 
 	// Output the special function used to emulate texCUBElod
-	if (m_tree->NeedsFunction("texCUBElod"))
+	if (m_tree->NeedsFunction("texCUBElod") && baseLevelOnly)
+	{
+        m_writer.WriteLine(0, "vec4 %s(samplerCube samp, vec4 texCoord) { return textureCube(samp, texCoord.xyz);  }", m_texCUBElodFunction);
+	}
+	else if (m_tree->NeedsFunction("texCUBElod"))
 	{
         const char* function = "textureLod";
 
@@ -588,7 +638,8 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
 void GLSLGenerator::OutputExtensions()
 {
     // #extension directives must come before any non-preprocessor token.
-    if (m_tree->NeedsFunction("tex2Dlod") || m_tree->NeedsFunction("tex2Dgrad") || m_tree->NeedsFunction("texCUBElod"))
+    if (!(m_options.flags & Flag_NoTextureLod) &&
+        (m_tree->NeedsFunction("tex2Dlod") || m_tree->NeedsFunction("tex2Dgrad") || m_tree->NeedsFunction("texCUBElod")))
     {
         if (m_version == Version_100_ES)
         {
@@ -1299,7 +1350,14 @@ void GLSLGenerator::OutputIdentifier(const char* name)
     }
     else if (String_Equal(name, "tex3D"))
     {
-        name = m_versionLegacy ? "texture3D" : "texture";
+        if (m_options.flags & Flag_Texture3DAtlas)
+        {
+            name = m_tex3DAtlasFunction;
+        }
+        else
+        {
+            name = m_versionLegacy ? "texture3D" : "texture";
+        }
     }
     else if (String_Equal(name, "clip"))
     {

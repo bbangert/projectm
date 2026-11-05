@@ -401,8 +401,14 @@ auto TranslateStage(const Settings& settings, const std::string& code, StageType
             throw TranslateError{"parse", M4::Log_GetFirstError()};
         }
 
+        // MilkdropShader::TranspileHLSLShader
+        unsigned int flags = M4::GLSLGenerator::Flag_AlternateNanPropagation;
+        if (settings.version == M4::GLSLGenerator::Version_100_ES)
+        {
+            flags |= M4::GLSLGenerator::Flag_NoTextureLod | M4::GLSLGenerator::Flag_NoDerivatives | M4::GLSLGenerator::Flag_Texture3DAtlas;
+        }
         if (!generator.Generate(&tree, M4::GLSLGenerator::Target_FragmentShader, settings.version, "PS",
-                                M4::GLSLGenerator::Options(M4::GLSLGenerator::Flag_AlternateNanPropagation)))
+                                M4::GLSLGenerator::Options(flags)))
         {
             throw TranslateError{"generate", M4::Log_GetFirstError()};
         }
