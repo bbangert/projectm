@@ -213,10 +213,12 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
     if (m_version == Version_110)
     {
         m_writer.WriteLine(0, "#version 110");
+        OutputExtensions();
     }
     if (m_version == Version_120)
     {
         m_writer.WriteLine(0, "#version 120");
+        OutputExtensions();
     }
     else if (m_version == Version_140)
     {
@@ -241,6 +243,7 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
     else if (m_version == Version_100_ES)
     {
         m_writer.WriteLine(0, "#version 100");
+        OutputExtensions();
         m_writer.WriteLine(0, "precision highp float;");
     }
     else if (m_version == Version_300_ES)
@@ -319,15 +322,13 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
     {
         const char* function = "textureLod";
 
-        if (m_versionLegacy)
+        if (m_version == Version_100_ES)
         {
-            m_writer.WriteLine(0, "#extension GL_ARB_shader_texture_lod : require");
-            function = "texture2DLod";
-        }
-        else if (m_version == Version_100_ES)
-        {
-            m_writer.WriteLine(0, "#extension GL_EXT_shader_texture_lod : require");
             function = "texture2DLodEXT";
+        }
+        else if (m_versionLegacy)
+        {
+            function = "texture2DLod";
         }
 
         m_writer.WriteLine(0, "vec4 %s(sampler2D samp, vec4 texCoord) { return %s(samp, texCoord.xy, texCoord.w);  }", m_tex2DlodFunction, function);
@@ -338,15 +339,13 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
     {
         const char* function = "textureGrad";
 
-        if (m_versionLegacy)
+        if (m_version == Version_100_ES)
         {
-            m_writer.WriteLine(0, "#extension GL_ARB_shader_texture_lod : require");
-            function = "texture2DGradARB";
-        }
-        else if (m_version == Version_100_ES)
-        {
-            m_writer.WriteLine(0, "#extension GL_EXT_shader_texture_lod : require");
             function = "texture2DGradEXT";
+        }
+        else if (m_versionLegacy)
+        {
+            function = "texture2DGradARB";
         }
 
         m_writer.WriteLine(0, "vec4 %s(sampler2D samp, vec2 texCoord, vec2 dx, vec2 dy) { return %s(samp, texCoord, dx, dy);  }", m_tex2DgradFunction, function);
@@ -401,12 +400,10 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
 
         if (m_version == Version_110 || m_version == Version_120)
         {
-            m_writer.WriteLine(0, "#extension GL_ARB_shader_texture_lod : require");
             function = "textureCubeLod";
         }
         else if (m_version == Version_100_ES)
         {
-            m_writer.WriteLine(0, "#extension GL_EXT_shader_texture_lod : require");
             function = "textureCubeLodEXT";
         }
 
@@ -510,12 +507,6 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
 
     OutputMatrixCtors();
 
-    // Output the extension used for dFdx/dFdy in GLES2
-    if (m_version == Version_100_ES && (m_tree->NeedsFunction("ddx") || m_tree->NeedsFunction("ddy")))
-    {
-        m_writer.WriteLine(0, "#extension GL_OES_standard_derivatives : require");
-    }
-
     OutputAttributes(entryFunction);
 
     if (m_target == Target_FragmentShader)
@@ -540,6 +531,28 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
 
     return !m_error;
 
+}
+
+void GLSLGenerator::OutputExtensions()
+{
+    // #extension directives must come before any non-preprocessor token.
+    if (m_tree->NeedsFunction("tex2Dlod") || m_tree->NeedsFunction("tex2Dgrad") || m_tree->NeedsFunction("texCUBElod"))
+    {
+        if (m_version == Version_100_ES)
+        {
+            m_writer.WriteLine(0, "#extension GL_EXT_shader_texture_lod : require");
+        }
+        else if (m_version == Version_110 || m_version == Version_120)
+        {
+            m_writer.WriteLine(0, "#extension GL_ARB_shader_texture_lod : require");
+        }
+    }
+
+    if (m_version == Version_100_ES &&
+        (m_tree->NeedsFunction("ddx") || m_tree->NeedsFunction("ddy") || m_tree->NeedsFunction("fwidth")))
+    {
+        m_writer.WriteLine(0, "#extension GL_OES_standard_derivatives : require");
+    }
 }
 
 const char* GLSLGenerator::GetResult() const

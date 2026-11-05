@@ -80,6 +80,7 @@ private:
     /// GLSL 1.10 and GLSL ES 1.00 only have square matrices.
     bool HasNonSquareMatrices() const { return m_version != Version_110 && m_version != Version_100_ES; }
 
+    void OutputExtensions();
     void OutputExpressionList(HLSLExpression* expression, HLSLArgument* argument = NULL);
     void OutputExpression(HLSLExpression* expression, const HLSLType* dstType = NULL);
     void OutputIdentifier(const char* name);
