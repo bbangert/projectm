@@ -82,6 +82,12 @@ private:
     /// GLSL 1.10 and GLSL ES 1.00 have neither array constructors nor array initializers.
     bool HasArrayConstructors() const { return m_version != Version_110 && m_version != Version_100_ES; }
 
+    /// The GLSL type name, with non-square matrices padded to square ones if the target lacks them.
+    const char* GetTypeName(const HLSLType& type) const;
+    void OutputPaddedMatrixOperand(HLSLExpression* expression, const HLSLType& type, int size);
+    void OutputPaddedMatrixMultiply(HLSLExpression* argument[2], const HLSLType& type0, const HLSLType& type1,
+                                    const HLSLType& resultType);
+    void OutputPaddingTruncation(const HLSLType& type, int paddedSize);
     void OutputExtensions();
     void OutputExpressionList(HLSLExpression* expression, HLSLArgument* argument = NULL);
     void OutputExpression(HLSLExpression* expression, const HLSLType* dstType = NULL);

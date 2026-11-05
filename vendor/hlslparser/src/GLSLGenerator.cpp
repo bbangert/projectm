@@ -43,7 +43,7 @@ const char* GLSLGenerator::s_reservedWord[] =
 		"main",
     };
 
-static const char* GetTypeName(const HLSLType& type)
+static const char* GetGLSLTypeName(const HLSLType& type)
 {
     switch (type.baseType)
     {
@@ -85,6 +85,48 @@ static const char* GetTypeName(const HLSLType& type)
         ASSERT(0);
         return "?";
     }
+}
+
+static bool IsNonSquareMatrixType(HLSLBaseType baseType)
+{
+    if (!IsMatrixType(baseType))
+    {
+        return false;
+    }
+    const BaseTypeDescription& description = baseTypeDescriptions[baseType];
+    return description.numComponents != description.height;
+}
+
+// Matrices are N x N, vectors have N components, scalars count as 1.
+static int GetPaddedMatrixSize(const HLSLType& type)
+{
+    const BaseTypeDescription& description = baseTypeDescriptions[type.baseType];
+    if (IsMatrixType(type.baseType))
+    {
+        return std::max(description.numComponents, description.height);
+    }
+    return IsVectorType(type.baseType) ? description.numComponents : 1;
+}
+
+static const char* GetSquareMatrixTypeName(int size)
+{
+    switch (size)
+    {
+    case 2: return "mat2";
+    case 3: return "mat3";
+    default: return "mat4";
+    }
+}
+
+const char* GLSLGenerator::GetTypeName(const HLSLType& type) const
+{
+    // An HLSL RxC matrix is a GLSL matCxR with m[c][r] == M[r][c]. Without non-square matrices
+    // it is stored zero-padded in a square matN, N = max(R, C), with the same element mapping.
+    if (!HasNonSquareMatrices() && IsNonSquareMatrixType(type.baseType))
+    {
+        return GetSquareMatrixTypeName(GetPaddedMatrixSize(type));
+    }
+    return GetGLSLTypeName(type);
 }
 
 static bool GetCanImplicitCast(const HLSLType& srcType, const HLSLType& dstType)
@@ -505,12 +547,12 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
     m_tree->EnumerateMatrixCtorsNeeded(matrixCtors);
     for(matrixCtor & ctor : matrixCtors)
     {
-        std::string id = GetTypeName(HLSLType(ctor.matrixType));
+        std::string id = GetGLSLTypeName(HLSLType(ctor.matrixType));
         id += "_from";
         for(HLSLBaseType argType : ctor.argumentTypes)
         {
             id += "_";
-            id += GetTypeName(HLSLType(argType));
+            id += GetGLSLTypeName(HLSLType(argType));
         }
         matrixCtorsId[ctor] = id;
     }
@@ -562,6 +604,65 @@ void GLSLGenerator::OutputExtensions()
         (m_tree->NeedsFunction("ddx") || m_tree->NeedsFunction("ddy") || m_tree->NeedsFunction("fwidth")))
     {
         m_writer.WriteLine(0, "#extension GL_OES_standard_derivatives : require");
+    }
+}
+
+void GLSLGenerator::OutputPaddedMatrixOperand(HLSLExpression* expression, const HLSLType& type, int size)
+{
+    int const typeSize = GetPaddedMatrixSize(type);
+    if (typeSize >= size || (!IsMatrixType(type.baseType) && !IsVectorType(type.baseType)))
+    {
+        OutputExpression(expression, &type);
+        return;
+    }
+
+    if (IsMatrixType(type.baseType))
+    {
+        // A larger matrix constructed from a padded one keeps the zero padding apart from a 1 on
+        // the diagonal, which the products below never pick up.
+        m_writer.Write("%s(", GetSquareMatrixTypeName(size));
+        OutputExpression(expression, &type);
+        m_writer.Write(")");
+        return;
+    }
+
+    m_writer.Write("vec%d(", size);
+    OutputExpression(expression, &type);
+    for (int i = typeSize; i < size; i++)
+    {
+        m_writer.Write(", 0.0");
+    }
+    m_writer.Write(")");
+}
+
+void GLSLGenerator::OutputPaddedMatrixMultiply(HLSLExpression* argument[2], const HLSLType& type0, const HLSLType& type1,
+                                               const HLSLType& resultType)
+{
+    // Pad vectors and matrices to the same size, multiply, then drop the padding of the result.
+    int const size = std::max(GetPaddedMatrixSize(type0), GetPaddedMatrixSize(type1));
+    bool const resizeResult = IsMatrixType(resultType.baseType) && GetPaddedMatrixSize(resultType) != size;
+
+    if (resizeResult)
+    {
+        m_writer.Write("%s(", GetTypeName(resultType));
+    }
+    m_writer.Write("((");
+    OutputPaddedMatrixOperand(argument[0], type0, size);
+    m_writer.Write(")*(");
+    OutputPaddedMatrixOperand(argument[1], type1, size);
+    m_writer.Write("))");
+    if (resizeResult)
+    {
+        m_writer.Write(")");
+    }
+    OutputPaddingTruncation(resultType, size);
+}
+
+void GLSLGenerator::OutputPaddingTruncation(const HLSLType& type, int paddedSize)
+{
+    if (IsVectorType(type.baseType) && baseTypeDescriptions[type.baseType].numComponents < paddedSize)
+    {
+        m_writer.Write(".%.*s", baseTypeDescriptions[type.baseType].numComponents, "xyzw");
     }
 }
 
@@ -948,6 +1049,10 @@ void GLSLGenerator::OutputExpression(HLSLExpression* expression, const HLSLType*
             m_writer.Write(",");
             OutputExpression(arrayAccess->index);
             m_writer.Write(")");
+            if (!HasNonSquareMatrices() && IsNonSquareMatrixType(arrayAccess->array->expressionType.baseType))
+            {
+                OutputPaddingTruncation(arrayAccess->expressionType, GetPaddedMatrixSize(arrayAccess->array->expressionType));
+            }
         }
         else
         {
@@ -987,6 +1092,10 @@ void GLSLGenerator::OutputExpression(HLSLExpression* expression, const HLSLType*
                 m_writer.Write("),(");
                 OutputExpression(argument[1], &type1);
                 m_writer.Write("))");
+            }
+            else if (!HasNonSquareMatrices() && (IsNonSquareMatrixType(type0.baseType) || IsNonSquareMatrixType(type1.baseType)))
+            {
+                OutputPaddedMatrixMultiply(argument, type0, type1, functionCall->function->returnType);
             }
             else
             {
@@ -2474,7 +2583,11 @@ void GLSLGenerator::OutputMatrixCtors() {
         m_writer.Write( ") { return %s(", GetTypeName(HLSLType(ctor.matrixType)));
 
         const BaseTypeDescription& ctorTypeDesc = baseTypeDescriptions[ctor.matrixType];
-        std::vector<std::string> args(ctorTypeDesc.numComponents * ctorTypeDesc.height, "0");
+        // A padded non-square matrix has more (and longer) GLSL columns, the extra entries stay 0.
+        bool const padded = !HasNonSquareMatrices() && IsNonSquareMatrixType(ctor.matrixType);
+        int const columnLength = padded ? GetPaddedMatrixSize(HLSLType(ctor.matrixType)) : ctorTypeDesc.numComponents;
+        int const columnCount = padded ? columnLength : ctorTypeDesc.height;
+        std::vector<std::string> args(columnLength * columnCount, "0");
         int argNumIn = 0;
         int argNumOut = 0;
         for(HLSLBaseType argType : ctor.argumentTypes)
@@ -2484,7 +2597,7 @@ void GLSLGenerator::OutputMatrixCtors() {
 
             if (IsScalarType(argType))
             {
-                int index = (argNumOut % ctorTypeDesc.height) * (ctorTypeDesc.numComponents) +
+                int index = (argNumOut % ctorTypeDesc.height) * columnLength +
                             (argNumOut / ctorTypeDesc.height);
                 args[index] = arg;
                 argNumOut++;
@@ -2496,7 +2609,7 @@ void GLSLGenerator::OutputMatrixCtors() {
                 {
                     std::string argVect = arg + ".";
                     argVect += "xyzw"[dim];
-                    int index = (argNumOut % ctorTypeDesc.height) * (ctorTypeDesc.numComponents) +
+                    int index = (argNumOut % ctorTypeDesc.height) * columnLength +
                                 (argNumOut / ctorTypeDesc.height);
                     args[index] = argVect;
                     argNumOut++;
