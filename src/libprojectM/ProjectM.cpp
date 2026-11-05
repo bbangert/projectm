@@ -255,7 +255,10 @@ void ProjectM::CheckGLSLVersion()
         LOG_FATAL(error);
         throw std::runtime_error(error);
     }
-#ifdef USE_GLES
+#if defined(USE_GLES2)
+    // Any GLES 2.0+ context provides GLSL ES 1.00; the loader already verified the context version.
+    static_cast<void>(glslVersion);
+#elif defined(USE_GLES)
     if (glslVersion.major < 3)
     {
         std::string error = "OpenGL ES shading language version 3.00 or higher is required, but the current context only provides version " + std::to_string(glslVersion.major) + "." + std::to_string(glslVersion.minor) + ".";

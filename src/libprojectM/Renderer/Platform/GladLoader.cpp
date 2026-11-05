@@ -43,7 +43,16 @@ auto GladLoader::CheckGLRequirements() -> bool
 
     GLProbe::CheckBuilder glCheck;
 
-#ifdef USE_GLES
+#if defined(USE_GLES2)
+
+    // Extension entry points are verified after GLAD loading, see VerifyGLES2EntryPoints().
+    glCheck
+        .WithApi(GLApi::OpenGLES)
+        .WithMinimumVersion(2, 0)
+        .WithMinimumShaderLanguageVersion(1, 0)
+        .WithRequireCoreProfile(false);
+
+#elif defined(USE_GLES)
 
     glCheck
         .WithApi(GLApi::OpenGLES)
@@ -136,6 +145,12 @@ auto GladLoader::Initialize() -> bool
             {
                 LOG_INFO("[GladLoader] GLAD    GLES2 API was loaded successfully");
             }
+#ifdef USE_GLES2
+            if (!VerifyGLES2EntryPoints())
+            {
+                return false;
+            }
+#endif
             m_isLoaded = true;
             return true;
         }
@@ -148,6 +163,102 @@ auto GladLoader::Initialize() -> bool
 #endif // #ifndef USE_GLES else
     }
 }
+
+auto GladLoader::HasSamplerObjects() const -> bool
+{
+    return m_hasSamplerObjects;
+}
+
+#ifdef USE_GLES2
+
+namespace {
+
+/**
+ * @brief Drains the GL error queue.
+ * @return The first error found, or GL_NO_ERROR.
+ */
+auto DrainGLErrors() -> GLenum
+{
+    GLenum first = GL_NO_ERROR;
+    for (int i = 0; i < 16; i++)
+    {
+        const GLenum error = glGetError();
+        if (error == GL_NO_ERROR)
+        {
+            break;
+        }
+        if (first == GL_NO_ERROR)
+        {
+            first = error;
+        }
+    }
+    return first;
+}
+
+} // namespace
+
+auto GladLoader::VerifyGLES2EntryPoints() -> bool
+{
+    // GLAD (generated with --alias) maps the OES/MESA extension functions onto the ES 3.0 core names,
+    // so the core names are what the renderer calls. A pointer is only loaded if the extension string
+    // (or ES 3.0) is present; a create/bind/delete round trip checks that the functions actually work.
+    const char* const coreOrExt = GLAD_GL_ES_VERSION_3_0 ? "OpenGL ES 3.0" : nullptr;
+
+    DrainGLErrors();
+
+    // Vertex array objects: required, used for every mesh.
+    const char* vaoSource = coreOrExt ? coreOrExt : (GLAD_GL_OES_vertex_array_object ? "GL_OES_vertex_array_object" : nullptr);
+    bool vaoUsable = vaoSource != nullptr &&
+                     glad_glGenVertexArrays != nullptr &&
+                     glad_glBindVertexArray != nullptr &&
+                     glad_glDeleteVertexArrays != nullptr;
+    if (vaoUsable)
+    {
+        GLuint vao{};
+        glGenVertexArrays(1, &vao);
+        glBindVertexArray(vao);
+        glBindVertexArray(0);
+        glDeleteVertexArrays(1, &vao);
+        vaoUsable = vao != 0 && DrainGLErrors() == GL_NO_ERROR;
+    }
+    if (!vaoUsable)
+    {
+        LOG_ERROR(std::string("[GladLoader] The OpenGL ES 2.0 backend requires vertex array objects, but ") +
+                  (vaoSource ? std::string(vaoSource) + " entry points glGenVertexArrays/glBindVertexArray/glDeleteVertexArrays did not resolve or failed"
+                             : std::string("GL_OES_vertex_array_object is not available")) +
+                  ".");
+        return false;
+    }
+
+    // Sampler objects: optional. Without them, sampler state is applied per texture.
+    const char* samplerSource = coreOrExt ? coreOrExt : (GLAD_GL_MESA_sampler_objects ? "GL_MESA_sampler_objects" : nullptr);
+    bool samplersUsable = samplerSource != nullptr &&
+                          glad_glGenSamplers != nullptr &&
+                          glad_glDeleteSamplers != nullptr &&
+                          glad_glBindSampler != nullptr &&
+                          glad_glSamplerParameteri != nullptr;
+    if (samplersUsable)
+    {
+        GLuint sampler{};
+        glGenSamplers(1, &sampler);
+        glSamplerParameteri(sampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glBindSampler(0, sampler);
+        glBindSampler(0, 0);
+        glDeleteSamplers(1, &sampler);
+        samplersUsable = sampler != 0 && DrainGLErrors() == GL_NO_ERROR;
+    }
+    m_hasSamplerObjects = samplersUsable;
+
+    LOG_INFO(std::string("[GladLoader] GLES2   vertex arrays via ") + vaoSource +
+             "; sampler objects " +
+             (samplersUsable ? std::string("via ") + samplerSource
+                             : std::string("unavailable (") + (samplerSource ? std::string(samplerSource) + " entry points did not resolve or failed" : std::string("no GL_MESA_sampler_objects")) +
+                                   "), falling back to per-texture sampler state"));
+
+    return true;
+}
+
+#endif // USE_GLES2
 
 } // namespace Platform
 } // namespace Renderer
