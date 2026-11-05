@@ -318,6 +318,7 @@ void Framebuffer::MaskDrawBuffer(int bufferIndex, bool masked)
     // Invert the flag, as "true" means the color channel *will* be written.
     auto glMasked = static_cast<GLboolean>(!masked);
 #ifdef USE_GLES
+    static_cast<void>(bufferIndex);
     glColorMask(glMasked, glMasked, glMasked, glMasked);
 #else
     glColorMaski(bufferIndex, glMasked, glMasked, glMasked, glMasked);

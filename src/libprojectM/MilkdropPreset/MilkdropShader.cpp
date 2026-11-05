@@ -656,13 +656,13 @@ void MilkdropShader::TranspileHLSLShader(const PresetState& presetState, std::st
     }
 
     // Now insert them on top.
-    for (const auto& texSizeDeclaration : texSizeDeclarations)
+    for (const auto& texSizeDecl : texSizeDeclarations)
     {
-        sourcePreprocessed.insert(0, texSizeDeclaration);
+        sourcePreprocessed.insert(0, texSizeDecl);
     }
-    for (const auto& samplerDeclaration : samplerDeclarations)
+    for (const auto& samplerDecl : samplerDeclarations)
     {
-        sourcePreprocessed.insert(0, samplerDeclaration);
+        sourcePreprocessed.insert(0, samplerDecl);
     }
 
     // Transpile from HLSL (aka preset shader aka DirectX shader) to GLSL (aka OpenGL shader lang)
