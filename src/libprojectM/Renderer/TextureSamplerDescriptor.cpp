@@ -84,7 +84,7 @@ auto TextureSamplerDescriptor::SamplerDeclaration() const -> std::string
     }
 
     std::string declaration = "uniform ";
-    if (m_texture->Type() == GL_TEXTURE_3D)
+    if (m_texture->IsVolume())
     {
         declaration.append("sampler3D sampler_");
     }

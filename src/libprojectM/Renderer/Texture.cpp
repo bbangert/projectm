@@ -1,10 +1,15 @@
 #include "Renderer/Texture.hpp"
 
+#include "Renderer/VolumeAtlas.hpp"
+
+#include <GLSLGenerator.h>
+
 #ifdef USE_GLES2
 #include <Logging.hpp>
 #endif
 
 #include <utility>
+#include <vector>
 
 namespace libprojectM {
 namespace Renderer {
@@ -13,9 +18,9 @@ namespace Renderer {
 namespace {
 
 /**
- * GLES 2 has no 3D textures. Textures with any target other than GL_TEXTURE_2D are never allocated
- * or bound, so shaders sampling them read an incomplete texture.
- * TODO(es2): store the noise volumes as 2D slice atlases instead.
+ * GLES 2 has no 3D textures; the noise volumes are 2D slice atlases there (CreateVolumeAtlas()).
+ * Textures with any target other than GL_TEXTURE_2D are never allocated or bound, so shaders
+ * sampling them read an incomplete texture.
  */
 auto TargetSupported(GLenum target) -> bool
 {
@@ -27,7 +32,7 @@ auto TargetSupported(GLenum target) -> bool
     static bool loggedUnsupported = false;
     if (!loggedUnsupported)
     {
-        LOG_WARN("[Texture] 3D textures are not supported on OpenGL ES 2.0; the noise volumes are left empty.");
+        LOG_WARN("[Texture] Only 2D textures are supported on OpenGL ES 2.0; other targets are left empty.");
         loggedUnsupported = true;
     }
     return false;
@@ -89,6 +94,26 @@ Texture::Texture(std::string name, const void* data, GLenum target, int width, i
 {
     glGenTextures(1, &m_textureId);
     Update(data);
+}
+
+auto Texture::CreateVolumeAtlas(std::string name, const void* volumeData, int size,
+                                GLint internalFormat, GLenum format, GLenum type) -> std::shared_ptr<Texture>
+{
+    auto texture = std::make_shared<Texture>();
+    texture->m_target = GL_TEXTURE_2D;
+    texture->m_name = std::move(name);
+    texture->m_width = size;
+    texture->m_height = size;
+    texture->m_depth = size;
+    texture->m_volumeAtlas = true;
+    texture->m_internalFormat = internalFormat;
+    texture->m_format = format;
+    texture->m_type = type;
+
+    glGenTextures(1, &texture->m_textureId);
+    texture->Update(volumeData);
+
+    return texture;
 }
 
 Texture::~Texture()
@@ -164,6 +189,11 @@ auto Texture::IsUserTexture() const -> bool
     return m_isUserTexture;
 }
 
+auto Texture::IsVolume() const -> bool
+{
+    return m_target == GL_TEXTURE_3D || m_volumeAtlas;
+}
+
 auto Texture::Empty() const -> bool
 {
     return m_textureId == 0;
@@ -181,6 +211,18 @@ void Texture::Update(const void* data) const
     switch (m_target)
     {
         case GL_TEXTURE_2D:
+            if (m_volumeAtlas)
+            {
+                using Atlas = M4::GLSLGenerator::Texture3DAtlas;
+                std::vector<uint32_t> atlas;
+                if (data != nullptr)
+                {
+                    atlas = BuildVolumeAtlas(static_cast<const uint32_t*>(data), m_depth);
+                }
+                glTexImage2D(m_target, 0, m_internalFormat, Atlas::Width, Atlas::Height, 0, m_format, m_type,
+                             atlas.empty() ? nullptr : atlas.data());
+                break;
+            }
             glTexImage2D(m_target, 0, m_internalFormat, m_width, m_height, 0, m_format, m_type, data);
             break;
 #ifndef USE_GLES2

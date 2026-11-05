@@ -32,12 +32,20 @@ auto MilkdropNoise::HighQuality() -> std::shared_ptr<Texture>
 
 auto MilkdropNoise::LowQualityVolume() -> std::shared_ptr<Texture>
 {
+#ifdef USE_GLES2
+    return Texture::CreateVolumeAtlas("noisevol_lq", generate3D(32, 1).data(), 32, GetSizedInternalFormat(), GetPreferredInternalFormat(), GL_UNSIGNED_BYTE);
+#else
     return std::make_shared<Texture>("noisevol_lq", generate3D(32, 1).data(), GL_TEXTURE_3D, 32, 32, 32, GL_RGBA8, GetPreferredInternalFormat(), GL_UNSIGNED_BYTE, false);
+#endif
 }
 
 auto MilkdropNoise::HighQualityVolume() -> std::shared_ptr<Texture>
 {
+#ifdef USE_GLES2
+    return Texture::CreateVolumeAtlas("noisevol_hq", generate3D(32, 4).data(), 32, GetSizedInternalFormat(), GetPreferredInternalFormat(), GL_UNSIGNED_BYTE);
+#else
     return std::make_shared<Texture>("noisevol_hq", generate3D(32, 4).data(), GL_TEXTURE_3D, 32, 32, 32, GL_RGBA8, GetPreferredInternalFormat(), GL_UNSIGNED_BYTE, false);
+#endif
 }
 
 auto MilkdropNoise::GetPreferredInternalFormat() -> int
