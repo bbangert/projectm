@@ -28,6 +28,7 @@ option(ENABLE_SDL_UI "Build the SDL2-based developer test UI. Ignored when build
 option(ENABLE_VERBOSE_LOGGING "Enables TRACE and DEBUG logging even in release builds, negatively affecting the performance." OFF)
 
 option(BUILD_TESTING "Build the libprojectM test suite" OFF)
+option(ENABLE_GLES_SMOKE_TEST "Build the headless EGL/OpenGL ES runtime smoke test. Requires ENABLE_GLES." OFF)
 option(BUILD_DOCS "Build documentation" OFF)
 
 # Enable vcpkg manifest features according to the build options set
@@ -230,6 +231,13 @@ if(BUILD_TESTING)
     add_subdirectory(tests)
 endif()
 
+if(ENABLE_GLES_SMOKE_TEST)
+    if(NOT USE_GLES OR ENABLE_EMSCRIPTEN)
+        message(FATAL_ERROR "ENABLE_GLES_SMOKE_TEST requires ENABLE_GLES and a native EGL platform.")
+    endif()
+    add_subdirectory(tests/gles-smoke)
+endif()
+
 message(STATUS "")
 message(STATUS "libprojectM v${PROJECT_VERSION}")
 message(STATUS "==============================================")
@@ -278,6 +286,7 @@ message(STATUS "    libprojectM:                 (always built)")
 message(STATUS "    Playlist library:            ${ENABLE_PLAYLIST}")
 message(STATUS "    SDL2 Test UI:                ${ENABLE_SDL_UI}")
 message(STATUS "    Tests:                       ${BUILD_TESTING}")
+message(STATUS "    GLES runtime smoke test:     ${ENABLE_GLES_SMOKE_TEST}")
 message(STATUS "    Documentation:               ${BUILD_DOCS}")
 message(STATUS "")
 
