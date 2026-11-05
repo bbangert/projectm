@@ -1379,6 +1379,10 @@ void GLSLGenerator::OutputIdentifier(const char* name)
     {
         name = "texture";
     }
+    else if (String_Equal(name, "tex3Dlod"))
+    {
+        name = m_tex3DlodFunction;
+    }
     else if (String_Equal(name, "texCUBEbias"))
     {
         name = m_texCUBEbiasFunction;
