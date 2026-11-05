@@ -130,6 +130,13 @@ TEST(GLSLGenerator, ES100EmulatesRoundAndModf)
     EXPECT_TRUE(Contains(glsl, "ip = x < 0.0 ? ceil(x) : floor(x);")) << glsl;
 }
 
+TEST(GLSLGenerator, ES100SaturatesIntegersAsFloats)
+{
+    auto glsl = TranslateES100("float4 PS(float2 uv : TEXCOORD0) : COLOR { int i = saturate(2); return float4(uv, i, 1); }\n");
+
+    EXPECT_TRUE(Contains(glsl, "int(clamp(float (2), 0.0, 1.0))")) << glsl;
+}
+
 TEST(GLSLGenerator, ES100ExtensionsFollowVersion)
 {
     const std::string hlsl = "sampler2D s;\n"

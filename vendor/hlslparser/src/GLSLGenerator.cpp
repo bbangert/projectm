@@ -1159,6 +1159,18 @@ void GLSLGenerator::OutputExpression(HLSLExpression* expression, const HLSLType*
 
             handled = true;
         }
+        else if (String_Equal(functionName, "saturate") && m_versionLegacy && functionCall->argument != NULL &&
+                 functionCall->argument->expressionType.baseType >= HLSLBaseType_Int &&
+                 functionCall->argument->expressionType.baseType <= HLSLBaseType_Int4)
+        {
+            // No integer clamp() before GLSL 1.30 / GLSL ES 3.00.
+            const HLSLType& intType = functionCall->argument->expressionType;
+            HLSLType floatType(static_cast<HLSLBaseType>(HLSLBaseType_Float + (intType.baseType - HLSLBaseType_Int)));
+            m_writer.Write("%s(clamp(", GetTypeName(intType));
+            OutputExpression(functionCall->argument, &floatType);
+            m_writer.Write(", 0.0, 1.0))");
+            handled = true;
+        }
         else if (String_Equal(functionName, "saturate"))
         {
             HLSLExpression* argument[1];
