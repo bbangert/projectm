@@ -122,6 +122,8 @@ int String_ToInteger(const char * str, char ** endptr) {
 
 // Engine/Log.cpp
 
+static thread_local std::string s_firstError;
+
 void Log_Error(const char * format, ...) {
     va_list args;
     va_start(args, format);
@@ -138,6 +140,17 @@ void Log_ErrorArgList(const char * format, va_list args) {
     va_end(tmp);
     vsnprintf(buffer.data(), buffer.size(), format, args );
     //LOG_ERROR("[HLSLParser] " + std::string(buffer.data()));
+    if (s_firstError.empty()) {
+        s_firstError = buffer.data();
+    }
+}
+
+const char * Log_GetFirstError() {
+    return s_firstError.c_str();
+}
+
+void Log_ClearFirstError() {
+    s_firstError.clear();
 }
 
 

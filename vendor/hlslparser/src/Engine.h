@@ -60,6 +60,10 @@ int String_ToInteger(const char * str, char ** end);
 void Log_Error(const char * format, ...);
 void Log_ErrorArgList(const char * format, va_list args);
 
+// The first error logged on this thread since the last Log_ClearFirstError(), or "".
+const char * Log_GetFirstError();
+void Log_ClearFirstError();
+
 
 // Engine/Array.h
 
