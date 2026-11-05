@@ -3,6 +3,9 @@
 /* Define USE_GLES */
 #cmakedefine USE_GLES
 
+/* Define USE_GLES2: OpenGL ES 2.0 / GLSL ES 1.00 backend (implies USE_GLES) */
+#cmakedefine USE_GLES2
+
 /* Define PROJECTM_USE_THREADS */
 #cmakedefine01 PROJECTM_USE_THREADS
 
