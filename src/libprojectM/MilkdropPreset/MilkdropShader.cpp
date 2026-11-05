@@ -692,9 +692,16 @@ void MilkdropShader::TranspileHLSLShader(const PresetState& presetState, std::st
     }
 
     // Then generate GLSL from the resulting parser tree
+    unsigned int generatorFlags = M4::GLSLGenerator::Flag_AlternateNanPropagation;
+#ifdef USE_GLES2
+    // projectM never mipmaps, so ignoring LODs is exact. The noise volumes are 2D atlases (MilkdropNoise).
+    generatorFlags |= M4::GLSLGenerator::Flag_NoTextureLod |
+                      M4::GLSLGenerator::Flag_NoDerivatives |
+                      M4::GLSLGenerator::Flag_Texture3DAtlas;
+#endif
     if (!generator.Generate(&tree, M4::GLSLGenerator::Target_FragmentShader,
                             MilkdropStaticShaders::Get()->GetGlslGeneratorVersion(),
-                            "PS", M4::GLSLGenerator::Options(M4::GLSLGenerator::Flag_AlternateNanPropagation)))
+                            "PS", M4::GLSLGenerator::Options(generatorFlags)))
     {
         LOG_DEBUG("[MilkdropShader] Failed " + shaderTypeString + " shader code:\n" + program);
         LOG_DEBUG("[MilkdropShader] Failed preprocessed " + shaderTypeString + " shader code:\n" + sourcePreprocessed);
