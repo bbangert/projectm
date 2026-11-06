@@ -112,6 +112,37 @@ public:
      */
     void LoadPresetData(std::istream& presetData, bool smoothTransition);
 
+    /**
+     * @brief Loads a preset and prepares it for display without switching to it.
+     *
+     * Initializes the preset (compiling its shaders) and renders one frame of it clipped to a
+     * single pixel, so shader compilation deferred to the first draw happens now. The active
+     * preset is not touched. Replaces a previously preloaded preset.
+     *
+     * @param presetFilename The preset filename or URL.
+     * @return The load result. Nothing is preloaded if the status is OtherError.
+     */
+    auto PreloadPresetFile(const std::string& presetFilename) -> PresetLoadResult;
+
+    /**
+     * @brief Like PreloadPresetFile(), with the preset read from a stream.
+     * @param presetData The preset data.
+     * @return The load result. Nothing is preloaded if the status is OtherError.
+     */
+    auto PreloadPresetData(std::istream& presetData) -> PresetLoadResult;
+
+    /**
+     * @brief Switches to the preloaded preset.
+     * @param smoothTransition True to blend, false for a hard cut.
+     * @return False if no preset is preloaded.
+     */
+    auto ActivatePreloadedPreset(bool smoothTransition) -> bool;
+
+    /**
+     * @brief Destroys the preloaded preset, if any.
+     */
+    void DiscardPreloadedPreset();
+
     void SetWindowSize(uint32_t width, uint32_t height);
 
     /**
@@ -336,9 +367,25 @@ private:
      * @brief Creates and initializes a preset and reports the load result.
      * @param presetFilename The preset filename, also used for reporting.
      * @param presetData The preset data to load instead of the file, or nullptr.
+     * @param loadResult Receives the load result if not nullptr.
      * @return The initialized preset, or nullptr if it could not be loaded.
      */
-    auto CreatePreset(const std::string& presetFilename, std::istream* presetData) -> std::unique_ptr<Preset>;
+    auto CreatePreset(const std::string& presetFilename, std::istream* presetData,
+                      PresetLoadResult* loadResult) -> std::unique_ptr<Preset>;
+
+    /**
+     * @brief Creates, initializes and warms up a preset and keeps it as the preloaded preset.
+     * @param presetFilename The preset filename, also used for reporting.
+     * @param presetData The preset data to load instead of the file, or nullptr.
+     * @return The load result.
+     */
+    auto PreloadPreset(const std::string& presetFilename, std::istream* presetData) -> PresetLoadResult;
+
+    /**
+     * @brief Renders one frame of a preset clipped to one pixel, restoring the caller's GL state.
+     * @param preset The initialized preset.
+     */
+    void WarmUpPreset(Preset& preset);
 
     /**
      * @brief Switches to an initialized preset.
@@ -388,6 +435,7 @@ private:
     std::unique_ptr<Renderer::CopyTexture> m_textureCopier;                       //!< Class that copies textures 1:1 to another texture or framebuffer.
     std::unique_ptr<Preset> m_activePreset;                                       //!< Currently loaded preset.
     std::unique_ptr<Preset> m_transitioningPreset;                                //!< Destination preset when smooth preset switching.
+    std::unique_ptr<Preset> m_preloadedPreset;                                    //!< Preset prepared by PreloadPresetFile(), not yet displayed.
     std::unique_ptr<Renderer::PresetTransition> m_transition;                     //!< Transition effect used for blending.
     std::unique_ptr<TimeKeeper> m_timeKeeper;                                     //!< Keeps the different timers used to render and switch presets.
     std::unique_ptr<UserSprites::SpriteManager> m_spriteManager;                  //!< Manages all types of user sprites.

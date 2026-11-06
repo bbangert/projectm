@@ -29,6 +29,7 @@
 #include <Audio/PCM.hpp>
 
 #include <Renderer/CopyTexture.hpp>
+#include <Renderer/OpenGL.h>
 #include <Renderer/PresetTransition.hpp>
 #include <Renderer/ShaderCache.hpp>
 #include <Renderer/TextureManager.hpp>
@@ -37,6 +38,7 @@
 
 #include <UserSprites/SpriteManager.hpp>
 
+#include <array>
 #include <stdexcept>
 #include <utility>
 
@@ -67,7 +69,7 @@ void ProjectM::PresetLoadResultEvent(const std::string&, const PresetLoadResult&
 
 void ProjectM::LoadPresetFile(const std::string& presetFilename, bool smoothTransition)
 {
-    auto preset = CreatePreset(presetFilename, nullptr);
+    auto preset = CreatePreset(presetFilename, nullptr, nullptr);
     if (preset)
     {
         StartPresetTransition(std::move(preset), !smoothTransition);
@@ -76,16 +78,126 @@ void ProjectM::LoadPresetFile(const std::string& presetFilename, bool smoothTran
 
 void ProjectM::LoadPresetData(std::istream& presetData, bool smoothTransition)
 {
-    auto preset = CreatePreset("", &presetData);
+    auto preset = CreatePreset("", &presetData, nullptr);
     if (preset)
     {
         StartPresetTransition(std::move(preset), !smoothTransition);
     }
 }
 
-auto ProjectM::CreatePreset(const std::string& presetFilename, std::istream* presetData) -> std::unique_ptr<Preset>
+auto ProjectM::PreloadPresetFile(const std::string& presetFilename) -> PresetLoadResult
+{
+    return PreloadPreset(presetFilename, nullptr);
+}
+
+auto ProjectM::PreloadPresetData(std::istream& presetData) -> PresetLoadResult
+{
+    return PreloadPreset("", &presetData);
+}
+
+auto ProjectM::ActivatePreloadedPreset(bool smoothTransition) -> bool
+{
+    if (!m_preloadedPreset)
+    {
+        return false;
+    }
+
+    StartPresetTransition(std::move(m_preloadedPreset), !smoothTransition);
+    return true;
+}
+
+void ProjectM::DiscardPreloadedPreset()
+{
+    m_preloadedPreset.reset();
+}
+
+auto ProjectM::PreloadPreset(const std::string& presetFilename, std::istream* presetData) -> PresetLoadResult
+{
+    m_preloadedPreset.reset();
+
+    PresetLoadResult result;
+    auto preset = CreatePreset(presetFilename, presetData, &result);
+    if (!preset)
+    {
+        return result;
+    }
+
+    try
+    {
+        WarmUpPreset(*preset);
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_ERROR(std::string("[ProjectM] Error warming up preset: ") + ex.what());
+        result.status = PresetLoadResult::Status::OtherError;
+        result.stage = PresetLoadResult::NoStage;
+        result.message = ex.what();
+        return result;
+    }
+
+    m_preloadedPreset = std::move(preset);
+    return result;
+}
+
+void ProjectM::WarmUpPreset(Preset& preset)
+{
+    if (m_windowWidth == 0 || m_windowHeight == 0)
+    {
+        return;
+    }
+
+    // One frame clipped to a single pixel: drivers that compile shader variants on the first draw
+    // (e.g. Mesa vc4) do it now, at almost no fill cost. The frame's CPU work (expression
+    // evaluation) is not saved. It changes one pixel of the preset's own buffers, which
+    // activation overwrites with the initial image unless presets start clean.
+    GLint framebuffer{};
+#ifdef USE_GLES2
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &framebuffer);
+#else
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &framebuffer);
+#endif
+    std::array<GLint, 4> viewport{};
+    glGetIntegerv(GL_VIEWPORT, viewport.data());
+    std::array<GLint, 4> scissorBox{};
+    glGetIntegerv(GL_SCISSOR_BOX, scissorBox.data());
+    GLboolean const scissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
+
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(0, 0, 1, 1);
+
+    auto restoreState = [&]() {
+        glScissor(scissorBox[0], scissorBox[1], scissorBox[2], scissorBox[3]);
+        if (!scissorEnabled)
+        {
+            glDisable(GL_SCISSOR_TEST);
+        }
+#ifdef USE_GLES2
+        glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(framebuffer));
+#else
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(framebuffer));
+#endif
+        glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+    };
+
+    try
+    {
+        preset.RenderFrame(m_audioStorage.GetFrameAudioData(), GetRenderContext());
+    }
+    catch (...)
+    {
+        restoreState();
+        throw;
+    }
+    restoreState();
+
+    glFlush();
+}
+
+auto ProjectM::CreatePreset(const std::string& presetFilename, std::istream* presetData,
+                            PresetLoadResult* loadResult) -> std::unique_ptr<Preset>
 {
     std::unique_ptr<Preset> preset;
+    PresetLoadResult result;
     try
     {
         m_textureManager->PurgeTextures();
@@ -104,21 +216,30 @@ auto ProjectM::CreatePreset(const std::string& presetFilename, std::istream* pre
         }
 
         preset->Initialize(GetRenderContext());
+        result = preset->LoadResult();
     }
     catch (const std::exception& ex)
     {
         LOG_ERROR(ex.what());
 
-        PresetLoadResult result;
+        result = PresetLoadResult();
         result.status = PresetLoadResult::Status::OtherError;
         result.message = ex.what();
+        if (loadResult != nullptr)
+        {
+            *loadResult = result;
+        }
         PresetLoadResultEvent(presetFilename, result);
 
         PresetSwitchFailedEvent(presetFilename, ex.what());
         return nullptr;
     }
 
-    PresetLoadResultEvent(presetFilename, preset->LoadResult());
+    if (loadResult != nullptr)
+    {
+        *loadResult = result;
+    }
+    PresetLoadResultEvent(presetFilename, result);
     return preset;
 }
 

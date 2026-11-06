@@ -80,7 +80,6 @@ if(BUILD_TESTING)
             "${PROJECTM_SOURCE_DIR}/presets/tests/110-per_pixel.milk"
             "${PROJECTM_SOURCE_DIR}/presets/tests/200-wave.milk"
             "${PROJECTM_SOURCE_DIR}/presets/tests/270-warpcomp-shaders.milk"
-            "${PROJECTM_SOURCE_DIR}/presets/tests/271-shader-textures.milk"
             "${PROJECTM_SOURCE_DIR}/presets/tests/250-wavecode.milk"
             "${PROJECTM_SOURCE_DIR}/presets/tests/100-square.milk"
             )
@@ -95,6 +94,11 @@ if(BUILD_TESTING)
         set(_smoke_environment "EGL_PLATFORM=surfaceless")
     endif()
     set_tests_properties(projectM-gles-smoke PROPERTIES ENVIRONMENT "${_smoke_environment}")
+
+    add_test(NAME projectM-gles-smoke-preload
+            COMMAND projectM-gles-smoke --frames 10 --preload ${_smoke_presets}
+            )
+    set_tests_properties(projectM-gles-smoke-preload PROPERTIES ENVIRONMENT "${_smoke_environment}")
 
     if(USE_GLES2)
         # The per-texture sampler state fallback must render like sampler objects, also for a

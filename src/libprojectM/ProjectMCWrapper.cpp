@@ -19,6 +19,29 @@
 #include <cstring>
 #include <sstream>
 
+namespace {
+
+auto ToCStatus(libprojectM::PresetLoadResult::Status status) -> projectm_preset_load_status
+{
+    using Status = libprojectM::PresetLoadResult::Status;
+    switch (status)
+    {
+        case Status::Ok:
+            return PROJECTM_PRESET_LOAD_OK;
+        case Status::TranslateError:
+            return PROJECTM_PRESET_LOAD_TRANSLATE_ERROR;
+        case Status::CompileError:
+            return PROJECTM_PRESET_LOAD_COMPILE_ERROR;
+        case Status::LinkError:
+            return PROJECTM_PRESET_LOAD_LINK_ERROR;
+        case Status::OtherError:
+        default:
+            return PROJECTM_PRESET_LOAD_OTHER_ERROR;
+    }
+}
+
+} // namespace
+
 namespace libprojectM {
 
 void projectMWrapper::PresetSwitchRequestedEvent(bool isHardCut) const
@@ -49,24 +72,7 @@ void projectMWrapper::PresetLoadResultEvent(const std::string& presetFilename,
 
     projectm_preset_load_result cResult{};
     cResult.preset_filename = presetFilename.c_str();
-    switch (result.status)
-    {
-        case PresetLoadResult::Status::Ok:
-            cResult.status = PROJECTM_PRESET_LOAD_OK;
-            break;
-        case PresetLoadResult::Status::TranslateError:
-            cResult.status = PROJECTM_PRESET_LOAD_TRANSLATE_ERROR;
-            break;
-        case PresetLoadResult::Status::CompileError:
-            cResult.status = PROJECTM_PRESET_LOAD_COMPILE_ERROR;
-            break;
-        case PresetLoadResult::Status::LinkError:
-            cResult.status = PROJECTM_PRESET_LOAD_LINK_ERROR;
-            break;
-        case PresetLoadResult::Status::OtherError:
-            cResult.status = PROJECTM_PRESET_LOAD_OTHER_ERROR;
-            break;
-    }
+    cResult.status = ToCStatus(result.status);
     cResult.stage = static_cast<projectm_preset_shader_stage>(result.stage);
     cResult.message = result.message.c_str();
     cResult.shader_stages = result.shaderStages;
@@ -169,6 +175,31 @@ void projectm_load_preset_data(projectm_handle instance, const char* data,
     std::stringstream presetDataStream(data);
     auto projectMInstance = handle_to_instance(instance);
     projectMInstance->LoadPresetData(presetDataStream, smooth_transition);
+}
+
+projectm_preset_load_status projectm_preload_preset_file(projectm_handle instance, const char* filename)
+{
+    auto projectMInstance = handle_to_instance(instance);
+    return ToCStatus(projectMInstance->PreloadPresetFile(filename).status);
+}
+
+projectm_preset_load_status projectm_preload_preset_data(projectm_handle instance, const char* data)
+{
+    std::stringstream presetDataStream(data);
+    auto projectMInstance = handle_to_instance(instance);
+    return ToCStatus(projectMInstance->PreloadPresetData(presetDataStream).status);
+}
+
+bool projectm_activate_preloaded_preset(projectm_handle instance, bool smooth_transition)
+{
+    auto projectMInstance = handle_to_instance(instance);
+    return projectMInstance->ActivatePreloadedPreset(smooth_transition);
+}
+
+void projectm_discard_preloaded_preset(projectm_handle instance)
+{
+    auto projectMInstance = handle_to_instance(instance);
+    projectMInstance->DiscardPreloadedPreset();
 }
 
 void projectm_set_preset_load_result_event_callback(projectm_handle instance,

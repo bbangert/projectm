@@ -12,7 +12,7 @@
  *   projectM-gles-smoke [--gbm <device>] [--size <w>x<h>] [--frames <n>] [--texture-path <dir>]
  *                       [--dump <prefix>] [--expect-failure <preset>] [--shader-cache-dir <dir>]
  *                       [--require-cached] [--expect-color <rrggbb>] [--expect-load-status <status>]
- *                       [--preset-list <file>] <preset.milk>...
+ *                       [--preset-list <file>] [--preload] <preset.milk>...
  *
  * --require-cached fails a preset unless all its shader stages came from the shader cache,
  * --expect-color checks that the last frame is that color, --expect-load-status checks the
@@ -20,7 +20,9 @@
  * optionally followed by ":warp" or ":comp"). --preset-list reads preset paths, one per line.
  *
  * Per preset, load_ms is the time of the load call and first_ms the time of the first frame
- * after it (the GLSL backend compile usually happens on the first draw).
+ * after it (the GLSL backend compile usually happens on the first draw). With --preload, presets
+ * are loaded with projectm_preload_preset_file() + projectm_activate_preloaded_preset(), timed
+ * as preload_ms and activate_ms (load_ms is their sum).
  *
  * On the ES 2 backend, PROJECTM_GLES2_NO_SAMPLER_OBJECTS=1 exercises the per-texture sampler state
  * fallback.
@@ -84,6 +86,7 @@ struct Options
     bool expectColor{false};
     unsigned char expectedColor[3]{};
     std::string expectLoadStatus;
+    bool preload{false};
     std::vector<std::string> presets;
 };
 
@@ -108,6 +111,8 @@ struct PresetResult
     double nonBlackFraction{};
     double meanLuma{};
     double loadMs{};
+    double preloadMs{};
+    double activateMs{};
     double firstFrameMs{};
     LoadResult load;
     double colorMatchFraction{};
@@ -283,6 +288,10 @@ auto ParseOptions(int argc, char** argv, Options& options) -> bool
         {
             options.expectLoadStatus = next();
         }
+        else if (arg == "--preload")
+        {
+            options.preload = true;
+        }
         else if (arg == "--preset-list")
         {
             const char* listFile = next();
@@ -332,7 +341,7 @@ int main(int argc, char** argv)
     {
         std::fprintf(stderr, "usage: %s [--gbm <device>] [--size WxH] [--frames N] [--texture-path DIR] "
                              "[--dump PREFIX] [--expect-failure PRESET] [--shader-cache-dir DIR] [--require-cached] "
-                             "[--expect-color RRGGBB] [--expect-load-status STATUS[:STAGE]] [--preset-list FILE] preset.milk...\n",
+                             "[--expect-color RRGGBB] [--expect-load-status STATUS[:STAGE]] [--preset-list FILE] [--preload] preset.milk...\n",
                      argv[0]);
         return 2;
     }
@@ -501,7 +510,19 @@ int main(int argc, char** argv)
 
         g_lastLoadResult = LoadResult();
         const auto loadStart = std::chrono::steady_clock::now();
-        projectm_load_preset_file(projectM, result.preset.c_str(), presetIndex > 0);
+        if (options.preload)
+        {
+            projectm_preload_preset_file(projectM, result.preset.c_str());
+            const auto activateStart = std::chrono::steady_clock::now();
+            projectm_activate_preloaded_preset(projectM, presetIndex > 0);
+            const auto activateEnd = std::chrono::steady_clock::now();
+            result.preloadMs = std::chrono::duration<double, std::milli>(activateStart - loadStart).count();
+            result.activateMs = std::chrono::duration<double, std::milli>(activateEnd - activateStart).count();
+        }
+        else
+        {
+            projectm_load_preset_file(projectM, result.preset.c_str(), presetIndex > 0);
+        }
         result.loadMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - loadStart).count();
         result.switchFailed = g_switchFailures.size() != failuresBefore;
         result.failureMessage = result.switchFailed ? g_lastSwitchFailureMessage : "";
@@ -600,9 +621,14 @@ int main(int argc, char** argv)
         }
         success = success && ok;
 
-        std::printf("%s %s: frames=%d load_ms=%.1f first_ms=%.1f mean=%.2f ms max=%.2f ms gl_errors=%u non_black=%.1f%% mean_luma=%.1f "
+        char preloadTimes[64] = "";
+        if (options.preload)
+        {
+            std::snprintf(preloadTimes, sizeof(preloadTimes), " preload_ms=%.1f activate_ms=%.1f", result.preloadMs, result.activateMs);
+        }
+        std::printf("%s %s: frames=%d load_ms=%.1f%s first_ms=%.1f mean=%.2f ms max=%.2f ms gl_errors=%u non_black=%.1f%% mean_luma=%.1f "
                     "load=%s stages=%u cached=%u%s%s\n",
-                    ok ? "PASS" : "FAIL", baseName.c_str(), options.frames, result.loadMs, result.firstFrameMs, result.meanMs, result.maxMs,
+                    ok ? "PASS" : "FAIL", baseName.c_str(), options.frames, result.loadMs, preloadTimes, result.firstFrameMs, result.meanMs, result.maxMs,
                     result.glErrors, 100.0 * result.nonBlackFraction, result.meanLuma, loadStatus.c_str(),
                     result.load.shaderStages, result.load.cachedStages,
                     result.switchFailed ? " switch_failed=" : "", result.switchFailed ? (expectFailure ? "expected" : result.failureMessage.c_str()) : "");
