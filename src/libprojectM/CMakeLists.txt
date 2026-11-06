@@ -54,6 +54,7 @@ add_library(projectM_main OBJECT
         PresetFactory.hpp
         PresetFactoryManager.cpp
         PresetFactoryManager.hpp
+        PresetLoadResult.hpp
         ProjectM.cpp
         ProjectM.hpp
         ProjectMCWrapper.cpp
@@ -189,6 +190,7 @@ if(BUILD_SHARED_LIBS)
                     "${CMAKE_CURRENT_SOURCE_DIR}/Renderer/RenderContext.hpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/Renderer/TextureTypes.hpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/Logging.hpp"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/PresetLoadResult.hpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/ProjectM.hpp"
                     )
         endif()
@@ -265,6 +267,7 @@ if(ENABLE_INSTALL)
 
             install(FILES
                     Logging.hpp
+                    PresetLoadResult.hpp
                     ProjectM.hpp
                     DESTINATION "${PROJECTM_INCLUDE_DIR}/projectM-4"
                     COMPONENT Devel

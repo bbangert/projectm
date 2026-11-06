@@ -22,6 +22,8 @@
 
 #include <projectM-4/projectM_cxx_export.h>
 
+#include "PresetLoadResult.hpp"
+
 #include <Renderer/RenderContext.hpp>
 #include <Renderer/TextureTypes.hpp>
 
@@ -49,7 +51,6 @@ class SpriteManager;
 } // namespace UserSprites
 
 class Preset;
-struct PresetLoadResult;
 class PresetFactoryManager;
 class TimeKeeper;
 
