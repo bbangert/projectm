@@ -145,6 +145,7 @@ void MilkdropPreset::ResetFirstFrame()
     m_isFirstFrame = true;
 
     m_state.blurTexture.Reset();
+    m_waveform.Reset();
 
     // Blank like newly allocated buffers, for a preset that starts clean or without an initial image.
     std::array<GLfloat, 4> clearColor{};

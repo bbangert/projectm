@@ -14,7 +14,8 @@
  *                       [--dump <prefix>] [--expect-failure <preset>] [--shader-cache-dir <dir>]
  *                       [--require-cached] [--expect-color <rrggbb>] [--expect-load-status <status>]
  *                       [--preset-list <file>] [--preload] [--hard-cut] [--start-clean]
- *                       [--callback-load <preset.milk>] [--fail-switch <index>] <preset.milk>...
+ *                       [--callback-load <preset.milk>] [--dump-first <n>] [--fail-switch <index>]
+ *                       <preset.milk>...
  *
  * --require-cached fails a preset unless all its shader stages came from the shader cache,
  * --expect-color checks that the last frame is that color, --expect-load-status checks the
@@ -29,6 +30,9 @@
  * bindings, viewport, scissor state and clear color as they were. --hard-cut switches without
  * blending, --start-clean enables projectm_set_preset_start_clean(). With --callback-load, the
  * load result callback of each preset's load loads the given preset with a hard cut.
+ *
+ * --dump writes the last frame of each preset to <prefix><index>.ppm, and with --dump-first also
+ * its first n frames to <prefix><index>_<frame>.ppm.
  *
  * --fail-switch makes the switch to the preset at the given zero-based position fail, with the
  * PROJECTM_TEST_FAIL_PRESET_SWITCH hook of a library built with BUILD_TESTING and
@@ -117,6 +121,7 @@ struct Options
     bool hardCut{false};
     bool startClean{false};
     std::string callbackLoad;
+    int dumpFirst{0};
     int failSwitch{-1};
     std::vector<std::string> presets;
 };
@@ -432,6 +437,10 @@ auto ParseOptions(int argc, char** argv, Options& options) -> bool
         {
             options.callbackLoad = next();
         }
+        else if (arg == "--dump-first")
+        {
+            options.dumpFirst = std::max(0, std::atoi(next()));
+        }
         else if (arg == "--fail-switch")
         {
             options.failSwitch = std::atoi(next());
@@ -486,7 +495,7 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "usage: %s [--gbm <device>] [--size WxH] [--frames N] [--texture-path DIR] "
                              "[--dump PREFIX] [--expect-failure PRESET] [--shader-cache-dir DIR] [--require-cached] "
                              "[--expect-color RRGGBB] [--expect-load-status STATUS[:STAGE]] [--preset-list FILE] [--preload] [--hard-cut] "
-                             "[--start-clean] [--callback-load PRESET] [--fail-switch INDEX] preset.milk...\n",
+                             "[--start-clean] [--callback-load PRESET] [--dump-first N] [--fail-switch INDEX] preset.milk...\n",
                      argv[0]);
         return 2;
     }
@@ -744,6 +753,14 @@ int main(int argc, char** argv)
                 {
                     std::fprintf(stderr, "GL error 0x%04x after frame %d of %s\n", error, frame, result.preset.c_str());
                 }
+            }
+
+            if (frame < options.dumpFirst && !options.dumpPrefix.empty())
+            {
+                glBindFramebuffer(GL_FRAMEBUFFER, targetFramebuffer);
+                glReadPixels(0, 0, options.width, options.height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+                glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                DumpPPM(options.dumpPrefix + std::to_string(presetIndex) + "_" + std::to_string(frame) + ".ppm", pixels, options.width, options.height);
             }
         }
 

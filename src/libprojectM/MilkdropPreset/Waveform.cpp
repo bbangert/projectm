@@ -122,6 +122,12 @@ void Waveform::Draw(const PerFrameContext& presetPerFrameContext)
     Renderer::Shader::Unbind();
 }
 
+void Waveform::Reset()
+{
+    // The waveform math keeps the smoothed samples of the last draw, part of which the next one reads.
+    m_waveformMath.reset();
+}
+
 void Waveform::ModulateOpacityByVolume(const PerFrameContext& presetPerFrameContext)
 {
     //modulate volume by opacity

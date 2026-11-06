@@ -103,7 +103,8 @@ if(BUILD_TESTING)
     add_test(NAME projectM-gles-smoke-preload-first-frame
             COMMAND ${CMAKE_COMMAND}
             -DSMOKE=$<TARGET_FILE:projectM-gles-smoke>
-            "-DPRESETS=${PROJECTM_SOURCE_DIR}/presets/tests/273-blur-history.milk;${PROJECTM_SOURCE_DIR}/presets/tests/274-warm-up-state.milk"
+            "-DPRESETS=${PROJECTM_SOURCE_DIR}/presets/tests/273-blur-history.milk;${PROJECTM_SOURCE_DIR}/presets/tests/274-warm-up-state.milk;${PROJECTM_SOURCE_DIR}/presets/tests/275-warm-up-waveform.milk"
+            -DLEAD_PRESET=${PROJECTM_SOURCE_DIR}/presets/tests/275-warm-up-waveform.milk
             -DOUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/preload-first-frame
             -P ${CMAKE_CURRENT_SOURCE_DIR}/ComparePreloadFirstFrame.cmake
             )
