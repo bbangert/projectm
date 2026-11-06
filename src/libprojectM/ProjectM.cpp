@@ -246,6 +246,9 @@ void ProjectM::WarmUpPreset(Preset& preset)
         preset.RenderFrame(m_audioStorage.GetFrameAudioData(), GetRenderContext());
     }
 
+    // Data the clipped frame left for the next one, e.g. the motion vector u/v map, is incomplete.
+    preset.ResetFirstFrame();
+
     glFlush();
 }
 

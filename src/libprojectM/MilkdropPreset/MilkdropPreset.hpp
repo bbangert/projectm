@@ -74,6 +74,8 @@ public:
 
     auto LoadResult() const -> PresetLoadResult override;
 
+    void ResetFirstFrame() override;
+
     /**
      * @brief Renders the preset.
      * @param audioData The frame audio data.

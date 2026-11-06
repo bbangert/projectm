@@ -122,6 +122,11 @@ auto MilkdropPreset::LoadResult() const -> PresetLoadResult
     return result;
 }
 
+void MilkdropPreset::ResetFirstFrame()
+{
+    m_isFirstFrame = true;
+}
+
 void MilkdropPreset::RenderFrame(const libprojectM::Audio::FrameAudioData& audioData, const Renderer::RenderContext& renderContext)
 {
     m_state.audioData = audioData;

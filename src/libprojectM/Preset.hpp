@@ -42,6 +42,15 @@ public:
                              const Renderer::RenderContext& renderContext) = 0;
 
     /**
+     * @brief Makes the next RenderFrame() behave like the first one after Initialize().
+     * Used after a frame that rendered only part of the viewport, so data it left for the next
+     * frame is not used.
+     */
+    virtual void ResetFirstFrame()
+    {
+    }
+
+    /**
      * @brief Returns a pointer to the current rendering output texture.
      * This pointer (the actual texture) may change from frame to frame, so this pointer should not be stored for use
      * across multiple frames. Instead, a new pointer should be requested whenever needed.
