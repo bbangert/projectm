@@ -33,6 +33,7 @@
 #include <Renderer/ShaderCache.hpp>
 #include <Renderer/TextureManager.hpp>
 #include <Renderer/TransitionShaderManager.hpp>
+#include <Renderer/VertexIndexArray.hpp>
 
 #include <UserSprites/SpriteManager.hpp>
 
@@ -537,20 +538,48 @@ void ProjectM::SetMeshSize(uint32_t meshResolutionX, uint32_t meshResolutionY)
     m_meshX = meshResolutionX;
     m_meshY = meshResolutionY;
 
-    // Need multiples of two, otherwise will not render a horizontal and/or vertical bar in the center of the warp mesh.
-    if (m_meshX % 2 == 1)
+    if (ConstrainMeshSize(m_meshX, m_meshY))
     {
-        m_meshX++;
+        LOG_WARN("Mesh size " + std::to_string(meshResolutionX) + "x" + std::to_string(meshResolutionY) +
+                 " exceeds the 16-bit vertex indices of OpenGL ES 2.0, using " +
+                 std::to_string(m_meshX) + "x" + std::to_string(m_meshY) + ".");
+    }
+}
+
+auto ProjectM::ConstrainMeshSize(uint32_t& meshResolutionX, uint32_t& meshResolutionY) -> bool
+{
+    // Need multiples of two, otherwise will not render a horizontal and/or vertical bar in the center of the warp mesh.
+    if (meshResolutionX % 2 == 1)
+    {
+        meshResolutionX++;
     }
 
-    if (m_meshY % 2 == 1)
+    if (meshResolutionY % 2 == 1)
     {
-        m_meshY++;
+        meshResolutionY++;
     }
 
     // Constrain per-pixel mesh size to sensible limits
-    m_meshX = std::max(8u, std::min(300u, m_meshX));
-    m_meshY = std::max(8u, std::min(300u, m_meshY));
+    meshResolutionX = std::max(8u, std::min(300u, meshResolutionX));
+    meshResolutionY = std::max(8u, std::min(300u, meshResolutionY));
+
+    bool reduced = false;
+#ifdef USE_GLES2
+    // The warp mesh has (x + 1) * (y + 1) vertices, drawn with 16-bit indices.
+    while (static_cast<size_t>(meshResolutionX + 1) * (meshResolutionY + 1) > Renderer::VertexIndexArray::MaxVertexCount)
+    {
+        if (meshResolutionX >= meshResolutionY)
+        {
+            meshResolutionX -= 2;
+        }
+        else
+        {
+            meshResolutionY -= 2;
+        }
+        reduced = true;
+    }
+#endif
+    return reduced;
 }
 
 void ProjectM::TexelOffsets(float& texelOffsetX, float& texelOffsetY) const
