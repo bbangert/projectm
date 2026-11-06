@@ -124,6 +124,21 @@ auto MilkdropPreset::LoadResult() const -> PresetLoadResult
     return result;
 }
 
+void MilkdropPreset::RenderWarmUpFrame(const libprojectM::Audio::FrameAudioData& audioData, const Renderer::RenderContext& renderContext)
+{
+    m_state.warmUpFrame = true;
+    try
+    {
+        RenderFrame(audioData, renderContext);
+    }
+    catch (...)
+    {
+        m_state.warmUpFrame = false;
+        throw;
+    }
+    m_state.warmUpFrame = false;
+}
+
 void MilkdropPreset::ResetFirstFrame()
 {
     // Skips the motion vectors, which read the u/v map before the next warp writes all of it.
@@ -272,7 +287,10 @@ void MilkdropPreset::PerFrameUpdate()
     m_perFrameContext.LoadStateVariables(m_state);
     m_perPixelContext.LoadStateReadOnlyVariables(m_state, m_perFrameContext);
 
-    m_perFrameContext.ExecutePerFrameCode();
+    if (!m_state.warmUpFrame)
+    {
+        m_perFrameContext.ExecutePerFrameCode();
+    }
 
     m_perPixelContext.LoadPerFrameQVariables(m_state, m_perFrameContext);
 

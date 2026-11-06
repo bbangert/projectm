@@ -146,10 +146,12 @@ void MilkdropShader::LoadVariables(const PresetState& presetState, const PerFram
 
     m_shader.SetUniformMat4x4("vertex_transformation", PresetState::orthogonalProjection);
 
-    m_shader.SetUniformFloat4("rand_frame", {floatRand(),
-                                             floatRand(),
-                                             floatRand(),
-                                             floatRand()});
+    glm::vec4 randFrame{};
+    if (!presetState.warmUpFrame)
+    {
+        randFrame = {floatRand(), floatRand(), floatRand(), floatRand()};
+    }
+    m_shader.SetUniformFloat4("rand_frame", randFrame);
     m_shader.SetUniformFloat4("rand_preset", {m_randValues[0],
                                               m_randValues[1],
                                               m_randValues[2],
@@ -235,7 +237,7 @@ void MilkdropShader::LoadVariables(const PresetState& presetState, const PerFram
     }
 
     // the last 4 are totally random, each frame
-    for (int i = 20; i < 24; i++)
+    for (int i = 20; i < 24 && !presetState.warmUpFrame; i++)
     {
         glm::mat4 const rotationX = glm::rotate(glm::mat4(1.0f), floatRand() * 6.28f, glm::vec3(1.0f, 0.0f, 0.0f));
         glm::mat4 const rotationY = glm::rotate(glm::mat4(1.0f), floatRand() * 6.28f, glm::vec3(0.0f, 1.0f, 0.0f));

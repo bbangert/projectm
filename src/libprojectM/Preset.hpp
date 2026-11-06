@@ -42,6 +42,19 @@ public:
                              const Renderer::RenderContext& renderContext) = 0;
 
     /**
+     * @brief Renders a frame like RenderFrame(), but without evaluating the preset's expressions or
+     * drawing per-frame random values, so their state stays as after Initialize(). Used to warm up
+     * the preset's GL state.
+     * @param audioData Audio data to be used by the preset.
+     * @param renderContext The current render context data.
+     */
+    virtual void RenderWarmUpFrame(const libprojectM::Audio::FrameAudioData& audioData,
+                                   const Renderer::RenderContext& renderContext)
+    {
+        RenderFrame(audioData, renderContext);
+    }
+
+    /**
      * @brief Makes the next RenderFrame() behave like the first one after Initialize().
      * Used after a frame that rendered only part of the viewport: the images it left for the next
      * frame (feedback buffers, blur textures) are discarded or cleared. Needs the scissor test

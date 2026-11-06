@@ -246,12 +246,12 @@ void ProjectM::WarmUpPreset(Preset& preset)
     }
 
     // One frame clipped to a single pixel: drivers that compile shader variants on the first draw
-    // (e.g. Mesa vc4) do it now, at almost no fill cost. The frame's CPU work (expression
-    // evaluation) is not saved.
+    // (e.g. Mesa vc4) do it now, at almost no fill cost. Neither expressions nor per-frame random
+    // values are evaluated, so the first displayed frame is that of a freshly loaded preset.
     ScissorStateGuard scissorState;
     glEnable(GL_SCISSOR_TEST);
     glScissor(0, 0, 1, 1);
-    preset.RenderFrame(m_audioStorage.GetFrameAudioData(), GetRenderContext());
+    preset.RenderWarmUpFrame(m_audioStorage.GetFrameAudioData(), GetRenderContext());
 
     // The clipped frame left mostly unwritten images (feedback buffers, blur textures, motion
     // vector u/v map) for the next one, which must start like a freshly loaded preset.

@@ -267,7 +267,7 @@ void PerPixelMesh::CalculateMesh(const PresetState& presetState, const PerFrameC
             WarpVertexParameters values = frameValues;
 
             // Execute per-vertex/per-pixel code if the preset uses it.
-            if (perPixelContext.perPixelCodeHandle)
+            if (perPixelContext.perPixelCodeHandle && !presetState.warmUpFrame)
             {
                 *perPixelContext.x = static_cast<double>(curVertex.X() * 0.5f * presetState.renderContext.aspectX + 0.5f);
                 *perPixelContext.y = static_cast<double>(curVertex.Y() * 0.5f * presetState.renderContext.aspectY + 0.5f);
