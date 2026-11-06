@@ -93,6 +93,30 @@ typedef enum
     PROJECTM_LOG_LEVEL_FATAL = 6   //!< Irrecoverable errors preventing projectM from working.
 } projectm_log_level;
 
+/**
+ * Outcome of loading a preset, see projectm_set_preset_load_result_event_callback().
+ * @since 4.2.0
+ */
+typedef enum
+{
+    PROJECTM_PRESET_LOAD_OK = 0,              //!< The preset and its shaders loaded without errors.
+    PROJECTM_PRESET_LOAD_TRANSLATE_ERROR = 1, //!< A preset shader failed to preprocess or translate from HLSL to GLSL.
+    PROJECTM_PRESET_LOAD_COMPILE_ERROR = 2,   //!< A preset shader failed to compile.
+    PROJECTM_PRESET_LOAD_LINK_ERROR = 3,      //!< A preset shader program failed to link.
+    PROJECTM_PRESET_LOAD_OTHER_ERROR = 4      //!< Anything else, e.g. the file could not be read or parsed.
+} projectm_preset_load_status;
+
+/**
+ * Preset shader stages. The values are also bit mask values.
+ * @since 4.2.0
+ */
+typedef enum
+{
+    PROJECTM_PRESET_SHADER_NONE = 0,     //!< No shader stage.
+    PROJECTM_PRESET_SHADER_WARP = 1,     //!< The warp shader.
+    PROJECTM_PRESET_SHADER_COMPOSITE = 2 //!< The composite shader.
+} projectm_preset_shader_stage;
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

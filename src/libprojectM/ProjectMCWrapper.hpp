@@ -33,12 +33,17 @@ public:
     void PresetSwitchFailedEvent(const std::string& presetFilename,
                                  const std::string& failureMessage) const override;
     void PresetSwitchRequestedEvent(bool isHardCut) const override;
+    void PresetLoadResultEvent(const std::string& presetFilename,
+                               const PresetLoadResult& result) const override;
 
     projectm_preset_switch_failed_event m_presetSwitchFailedEventCallback{nullptr};
     void* m_presetSwitchFailedEventUserData{nullptr};
 
     projectm_preset_switch_requested_event m_presetSwitchRequestedEventCallback{nullptr};
     void* m_presetSwitchRequestedEventUserData{nullptr};
+
+    projectm_preset_load_result_event m_presetLoadResultEventCallback{nullptr};
+    void* m_presetLoadResultEventUserData{nullptr};
 
     projectm_texture_load_event m_textureLoadEventCallback{nullptr};
     void* m_textureLoadEventUserData{nullptr};

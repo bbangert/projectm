@@ -10,7 +10,17 @@
  *
  * Usage:
  *   projectM-gles-smoke [--gbm <device>] [--size <w>x<h>] [--frames <n>] [--texture-path <dir>]
- *                       [--dump <prefix>] [--expect-failure <preset>] <preset.milk>...
+ *                       [--dump <prefix>] [--expect-failure <preset>] [--shader-cache-dir <dir>]
+ *                       [--require-cached] [--expect-color <rrggbb>] [--expect-load-status <status>]
+ *                       [--preset-list <file>] <preset.milk>...
+ *
+ * --require-cached fails a preset unless all its shader stages came from the shader cache,
+ * --expect-color checks that the last frame is that color, --expect-load-status checks the
+ * preset load result ("ok", "translate_error", "compile_error", "link_error" or "other_error",
+ * optionally followed by ":warp" or ":comp"). --preset-list reads preset paths, one per line.
+ *
+ * Per preset, load_ms is the time of the load call and first_ms the time of the first frame
+ * after it (the GLSL backend compile usually happens on the first draw).
  *
  * On the ES 2 backend, PROJECTM_GLES2_NO_SAMPLER_OBJECTS=1 exercises the per-texture sampler state
  * fallback.
@@ -69,7 +79,22 @@ struct Options
     std::string texturePath;
     std::string dumpPrefix;
     std::set<std::string> expectFailure;
+    std::string shaderCacheDir;
+    bool requireCached{false};
+    bool expectColor{false};
+    unsigned char expectedColor[3]{};
+    std::string expectLoadStatus;
     std::vector<std::string> presets;
+};
+
+struct LoadResult
+{
+    bool reported{false};
+    projectm_preset_load_status status{PROJECTM_PRESET_LOAD_OK};
+    projectm_preset_shader_stage stage{PROJECTM_PRESET_SHADER_NONE};
+    std::string message;
+    uint32_t shaderStages{};
+    uint32_t cachedStages{};
 };
 
 struct PresetResult
@@ -82,10 +107,81 @@ struct PresetResult
     double maxMs{};
     double nonBlackFraction{};
     double meanLuma{};
+    double loadMs{};
+    double firstFrameMs{};
+    LoadResult load;
+    double colorMatchFraction{};
 };
 
 std::vector<std::string> g_switchFailures;
 std::string g_lastSwitchFailureMessage;
+LoadResult g_lastLoadResult;
+
+auto StatusName(projectm_preset_load_status status) -> const char*
+{
+    switch (status)
+    {
+        case PROJECTM_PRESET_LOAD_OK:
+            return "ok";
+        case PROJECTM_PRESET_LOAD_TRANSLATE_ERROR:
+            return "translate_error";
+        case PROJECTM_PRESET_LOAD_COMPILE_ERROR:
+            return "compile_error";
+        case PROJECTM_PRESET_LOAD_LINK_ERROR:
+            return "link_error";
+        case PROJECTM_PRESET_LOAD_OTHER_ERROR:
+        default:
+            return "other_error";
+    }
+}
+
+auto StatusWithStage(const LoadResult& result) -> std::string
+{
+    std::string text = StatusName(result.status);
+    if (result.stage == PROJECTM_PRESET_SHADER_WARP)
+    {
+        text += ":warp";
+    }
+    else if (result.stage == PROJECTM_PRESET_SHADER_COMPOSITE)
+    {
+        text += ":comp";
+    }
+    return text;
+}
+
+void LoadResultCallback(const projectm_preset_load_result* result, void*)
+{
+    g_lastLoadResult.reported = true;
+    g_lastLoadResult.status = result->status;
+    g_lastLoadResult.stage = result->stage;
+    g_lastLoadResult.message = result->message ? result->message : "";
+    g_lastLoadResult.shaderStages = result->shader_stages;
+    g_lastLoadResult.cachedStages = result->cached_stages;
+}
+
+auto ReadPresetList(const std::string& path, std::vector<std::string>& presets) -> bool
+{
+    FILE* file = std::fopen(path.c_str(), "r");
+    if (file == nullptr)
+    {
+        return false;
+    }
+    char line[4096];
+    while (std::fgets(line, sizeof(line), file) != nullptr)
+    {
+        std::string entry(line);
+        while (!entry.empty() && (entry.back() == '\n' || entry.back() == '\r'))
+        {
+            entry.pop_back();
+        }
+        if (!entry.empty())
+        {
+            presets.push_back(entry);
+        }
+    }
+    std::fclose(file);
+    return true;
+}
 
 void LogCallback(const char* message, projectm_log_level level, void*)
 {
@@ -163,6 +259,39 @@ auto ParseOptions(int argc, char** argv, Options& options) -> bool
         {
             options.expectFailure.insert(next());
         }
+        else if (arg == "--shader-cache-dir")
+        {
+            options.shaderCacheDir = next();
+        }
+        else if (arg == "--require-cached")
+        {
+            options.requireCached = true;
+        }
+        else if (arg == "--expect-color")
+        {
+            unsigned int color{};
+            if (std::sscanf(next(), "%6x", &color) != 1)
+            {
+                return false;
+            }
+            options.expectColor = true;
+            options.expectedColor[0] = static_cast<unsigned char>(color >> 16);
+            options.expectedColor[1] = static_cast<unsigned char>(color >> 8);
+            options.expectedColor[2] = static_cast<unsigned char>(color);
+        }
+        else if (arg == "--expect-load-status")
+        {
+            options.expectLoadStatus = next();
+        }
+        else if (arg == "--preset-list")
+        {
+            const char* listFile = next();
+            if (!ReadPresetList(listFile, options.presets))
+            {
+                std::fprintf(stderr, "Cannot read %s\n", listFile);
+                std::exit(2);
+            }
+        }
 
         else if (arg.rfind("--", 0) == 0)
         {
@@ -202,7 +331,8 @@ int main(int argc, char** argv)
     if (!ParseOptions(argc, argv, options))
     {
         std::fprintf(stderr, "usage: %s [--gbm <device>] [--size WxH] [--frames N] [--texture-path DIR] "
-                             "[--dump PREFIX] [--expect-failure PRESET] preset.milk...\n",
+                             "[--dump PREFIX] [--expect-failure PRESET] [--shader-cache-dir DIR] [--require-cached] "
+                             "[--expect-color RRGGBB] [--expect-load-status STATUS[:STAGE]] [--preset-list FILE] preset.milk...\n",
                      argv[0]);
         return 2;
     }
@@ -346,6 +476,11 @@ int main(int argc, char** argv)
     projectm_set_preset_locked(projectM, true);
     projectm_set_soft_cut_duration(projectM, 0.5);
     projectm_set_preset_switch_failed_event_callback(projectM, &SwitchFailedCallback, nullptr);
+    projectm_set_preset_load_result_event_callback(projectM, &LoadResultCallback, nullptr);
+    if (!options.shaderCacheDir.empty())
+    {
+        projectm_set_shader_cache_dir(projectM, options.shaderCacheDir.c_str());
+    }
     if (!options.texturePath.empty())
     {
         const char* paths[] = {options.texturePath.c_str()};
@@ -364,9 +499,13 @@ int main(int argc, char** argv)
         result.preset = options.presets[presetIndex];
         const size_t failuresBefore = g_switchFailures.size();
 
+        g_lastLoadResult = LoadResult();
+        const auto loadStart = std::chrono::steady_clock::now();
         projectm_load_preset_file(projectM, result.preset.c_str(), presetIndex > 0);
+        result.loadMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - loadStart).count();
         result.switchFailed = g_switchFailures.size() != failuresBefore;
         result.failureMessage = result.switchFailed ? g_lastSwitchFailureMessage : "";
+        result.load = g_lastLoadResult;
 
         std::vector<double> frameMs;
         for (int frame = 0; frame < options.frames; frame++)
@@ -397,6 +536,8 @@ int main(int argc, char** argv)
             }
         }
 
+        result.firstFrameMs = frameMs.front();
+
         // Skip the first frames (shader compiles) for the timing.
         const size_t skip = std::min<size_t>(5, frameMs.size() - 1);
         double sum = 0.0;
@@ -416,16 +557,24 @@ int main(int argc, char** argv)
         }
 
         size_t nonBlack = 0;
+        size_t colorMatches = 0;
         double lumaSum = 0.0;
         for (size_t i = 0; i < pixels.size(); i += 4)
         {
             const int maxChannel = std::max({pixels[i], pixels[i + 1], pixels[i + 2]});
             nonBlack += maxChannel > 8 ? 1 : 0;
             lumaSum += 0.299 * pixels[i] + 0.587 * pixels[i + 1] + 0.114 * pixels[i + 2];
+            bool matches = true;
+            for (int channel = 0; channel < 3; channel++)
+            {
+                matches = matches && std::abs(static_cast<int>(pixels[i + channel]) - options.expectedColor[channel]) <= 8;
+            }
+            colorMatches += matches ? 1 : 0;
         }
         const double pixelCount = static_cast<double>(pixels.size() / 4);
         result.nonBlackFraction = static_cast<double>(nonBlack) / pixelCount;
         result.meanLuma = lumaSum / pixelCount;
+        result.colorMatchFraction = static_cast<double>(colorMatches) / pixelCount;
 
         if (!options.dumpPrefix.empty())
         {
@@ -437,14 +586,30 @@ int main(int argc, char** argv)
         bool ok = result.glErrors == 0 && result.switchFailed == expectFailure;
         if (!result.switchFailed)
         {
-            ok = ok && result.nonBlackFraction > 0.001;
+            ok = ok && (options.expectColor ? result.colorMatchFraction > 0.99 : result.nonBlackFraction > 0.001);
+        }
+        const std::string loadStatus = StatusWithStage(result.load);
+        if (!options.expectLoadStatus.empty())
+        {
+            ok = ok && result.load.reported &&
+                 (loadStatus == options.expectLoadStatus || StatusName(result.load.status) == options.expectLoadStatus);
+        }
+        if (options.requireCached)
+        {
+            ok = ok && result.load.cachedStages == result.load.shaderStages;
         }
         success = success && ok;
 
-        std::printf("%s %s: frames=%d mean=%.2f ms max=%.2f ms gl_errors=%u non_black=%.1f%% mean_luma=%.1f%s%s\n",
-                    ok ? "PASS" : "FAIL", baseName.c_str(), options.frames, result.meanMs, result.maxMs, result.glErrors,
-                    100.0 * result.nonBlackFraction, result.meanLuma,
+        std::printf("%s %s: frames=%d load_ms=%.1f first_ms=%.1f mean=%.2f ms max=%.2f ms gl_errors=%u non_black=%.1f%% mean_luma=%.1f "
+                    "load=%s stages=%u cached=%u%s%s\n",
+                    ok ? "PASS" : "FAIL", baseName.c_str(), options.frames, result.loadMs, result.firstFrameMs, result.meanMs, result.maxMs,
+                    result.glErrors, 100.0 * result.nonBlackFraction, result.meanLuma, loadStatus.c_str(),
+                    result.load.shaderStages, result.load.cachedStages,
                     result.switchFailed ? " switch_failed=" : "", result.switchFailed ? (expectFailure ? "expected" : result.failureMessage.c_str()) : "");
+        if (result.load.status != PROJECTM_PRESET_LOAD_OK && !result.switchFailed)
+        {
+            std::printf("    load message: %.300s\n", result.load.message.c_str());
+        }
         results.push_back(result);
     }
 

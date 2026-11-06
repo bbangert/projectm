@@ -78,6 +78,50 @@ void MilkdropPreset::Initialize(const Renderer::RenderContext& renderContext)
     m_finalComposite.CompileCompositeShader(m_state);
 }
 
+auto MilkdropPreset::LoadResult() const -> PresetLoadResult
+{
+    PresetLoadResult result;
+
+    auto addStage = [&result](uint32_t stage, const ShaderStageResult& stageResult, const MilkdropShader* activeShader) {
+        if (activeShader != nullptr)
+        {
+            result.shaderStages |= stage;
+            if (activeShader->LoadedFromCache())
+            {
+                result.cachedStages |= stage;
+            }
+        }
+
+        if (!stageResult.failed || result.status != PresetLoadResult::Status::Ok)
+        {
+            return;
+        }
+
+        switch (stageResult.kind)
+        {
+            case Renderer::ShaderException::Kind::Translate:
+                result.status = PresetLoadResult::Status::TranslateError;
+                break;
+            case Renderer::ShaderException::Kind::Compile:
+                result.status = PresetLoadResult::Status::CompileError;
+                break;
+            case Renderer::ShaderException::Kind::Link:
+                result.status = PresetLoadResult::Status::LinkError;
+                break;
+            case Renderer::ShaderException::Kind::Other:
+                result.status = PresetLoadResult::Status::OtherError;
+                break;
+        }
+        result.stage = stage;
+        result.message = stageResult.message;
+    };
+
+    addStage(PresetLoadResult::WarpStage, m_perPixelMesh.WarpShaderResult(), m_perPixelMesh.WarpShader());
+    addStage(PresetLoadResult::CompositeStage, m_finalComposite.CompositeShaderResult(), m_finalComposite.CompositeShader());
+
+    return result;
+}
+
 void MilkdropPreset::RenderFrame(const libprojectM::Audio::FrameAudioData& audioData, const Renderer::RenderContext& renderContext)
 {
     m_state.audioData = audioData;

@@ -49,6 +49,7 @@ class SpriteManager;
 } // namespace UserSprites
 
 class Preset;
+struct PresetLoadResult;
 class PresetFactoryManager;
 class TimeKeeper;
 
@@ -80,6 +81,17 @@ public:
      * @param message The error message with the failure reason.
      */
     virtual void PresetSwitchFailedEvent(const std::string& presetFilename, const std::string& message) const;
+
+    /**
+     * @brief Callback for the outcome of every preset load, successful or not.
+     *
+     * Called before PresetSwitchFailedEvent() if the preset could not be loaded at all. A preset
+     * whose shaders failed still loads (with fallback shaders) and reports the failure here.
+     *
+     * @param presetFilename The filename of the preset, empty for preset data.
+     * @param result The load result.
+     */
+    virtual void PresetLoadResultEvent(const std::string& presetFilename, const PresetLoadResult& result) const;
 
     /**
      * @brief Loads the given preset file and performs a smooth or immediate transition.
@@ -320,6 +332,19 @@ private:
 
     void CheckGLSLVersion();
 
+    /**
+     * @brief Creates and initializes a preset and reports the load result.
+     * @param presetFilename The preset filename, also used for reporting.
+     * @param presetData The preset data to load instead of the file, or nullptr.
+     * @return The initialized preset, or nullptr if it could not be loaded.
+     */
+    auto CreatePreset(const std::string& presetFilename, std::istream* presetData) -> std::unique_ptr<Preset>;
+
+    /**
+     * @brief Switches to an initialized preset.
+     * @param preset The initialized preset.
+     * @param hardCut True to switch immediately, false to blend.
+     */
     void StartPresetTransition(std::unique_ptr<Preset>&& preset, bool hardCut);
 
     void LoadIdlePreset();

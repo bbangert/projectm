@@ -26,6 +26,22 @@ class PerFrameContext;
 class PresetState;
 
 /**
+ * @brief Records the first shader failure of a preset shader stage.
+ */
+struct ShaderStageResult
+{
+    bool failed{false};                                                           //!< True if a shader of this stage failed.
+    Renderer::ShaderException::Kind kind{Renderer::ShaderException::Kind::Other}; //!< The step that failed first.
+    std::string message;                                                          //!< The first error message, plus any fallback errors.
+
+    /**
+     * @brief Records a failure. Later failures, e.g. of a fallback shader, only extend the message.
+     * @param exception The shader exception.
+     */
+    void RecordFailure(const Renderer::ShaderException& exception);
+};
+
+/**
  * @brief Holds a warp or composite shader of Milkdrop presets.
  * Also does the required shader translation from HLSL to GLSL using hlslparser.
  */

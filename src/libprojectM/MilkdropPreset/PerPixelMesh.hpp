@@ -1,5 +1,7 @@
 #pragma once
 
+#include "MilkdropShader.hpp"
+
 #include <Renderer/Mesh.hpp>
 #include <Renderer/Shader.hpp>
 
@@ -9,7 +11,6 @@ namespace MilkdropPreset {
 class PresetState;
 class PerFrameContext;
 class PerPixelContext;
-class MilkdropShader;
 
 /**
  * @brief The "per-pixel" transformation mesh.
@@ -40,6 +41,16 @@ public:
      * @param presetState The preset state to retrieve the configuration values from.
      */
     void CompileWarpShader(PresetState& presetState);
+
+    /**
+     * @brief Returns the failures of the preset warp shader, if any.
+     */
+    auto WarpShaderResult() const -> const ShaderStageResult&;
+
+    /**
+     * @brief Returns the preset warp shader, or nullptr if the default warp shader is used.
+     */
+    auto WarpShader() const -> const MilkdropShader*;
 
     /**
      * @brief Renders the transformation mesh.
@@ -130,6 +141,7 @@ private:
 
     std::weak_ptr<Renderer::Shader> m_perPixelMeshShader;             //!< Special shader which calculates the per-pixel UV coordinates.
     std::unique_ptr<MilkdropShader> m_warpShader;                     //!< The warp shader. Either preset-defined or a default shader.
+    ShaderStageResult m_warpShaderResult;                             //!< Failures of the preset warp shader.
     Renderer::Sampler m_perPixelSampler{GL_CLAMP_TO_EDGE, GL_LINEAR}; //!< The main texture sampler.
 };
 

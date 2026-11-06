@@ -72,6 +72,8 @@ public:
      */
     void Initialize(const Renderer::RenderContext& renderContext) override;
 
+    auto LoadResult() const -> PresetLoadResult override;
+
     /**
      * @brief Renders the preset.
      * @param audioData The frame audio data.

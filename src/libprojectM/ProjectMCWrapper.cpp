@@ -1,5 +1,7 @@
 #include "ProjectMCWrapper.hpp"
 
+#include "Preset.hpp"
+
 #include "Renderer/Platform/GladLoader.hpp"
 
 #include <projectM-4/projectM.h>
@@ -35,6 +37,42 @@ void projectMWrapper::PresetSwitchFailedEvent(const std::string& presetFilename,
         m_presetSwitchFailedEventCallback(presetFilename.c_str(),
                                           failureMessage.c_str(), m_presetSwitchFailedEventUserData);
     }
+}
+
+void projectMWrapper::PresetLoadResultEvent(const std::string& presetFilename,
+                                            const PresetLoadResult& result) const
+{
+    if (!m_presetLoadResultEventCallback)
+    {
+        return;
+    }
+
+    projectm_preset_load_result cResult{};
+    cResult.preset_filename = presetFilename.c_str();
+    switch (result.status)
+    {
+        case PresetLoadResult::Status::Ok:
+            cResult.status = PROJECTM_PRESET_LOAD_OK;
+            break;
+        case PresetLoadResult::Status::TranslateError:
+            cResult.status = PROJECTM_PRESET_LOAD_TRANSLATE_ERROR;
+            break;
+        case PresetLoadResult::Status::CompileError:
+            cResult.status = PROJECTM_PRESET_LOAD_COMPILE_ERROR;
+            break;
+        case PresetLoadResult::Status::LinkError:
+            cResult.status = PROJECTM_PRESET_LOAD_LINK_ERROR;
+            break;
+        case PresetLoadResult::Status::OtherError:
+            cResult.status = PROJECTM_PRESET_LOAD_OTHER_ERROR;
+            break;
+    }
+    cResult.stage = static_cast<projectm_preset_shader_stage>(result.stage);
+    cResult.message = result.message.c_str();
+    cResult.shader_stages = result.shaderStages;
+    cResult.cached_stages = result.cachedStages;
+
+    m_presetLoadResultEventCallback(&cResult, m_presetLoadResultEventUserData);
 }
 
 } // namespace libprojectM
@@ -131,6 +169,14 @@ void projectm_load_preset_data(projectm_handle instance, const char* data,
     std::stringstream presetDataStream(data);
     auto projectMInstance = handle_to_instance(instance);
     projectMInstance->LoadPresetData(presetDataStream, smooth_transition);
+}
+
+void projectm_set_preset_load_result_event_callback(projectm_handle instance,
+                                                    projectm_preset_load_result_event callback, void* user_data)
+{
+    auto projectMInstance = handle_to_instance(instance);
+    projectMInstance->m_presetLoadResultEventCallback = callback;
+    projectMInstance->m_presetLoadResultEventUserData = user_data;
 }
 
 void projectm_set_preset_switch_requested_event_callback(projectm_handle instance,

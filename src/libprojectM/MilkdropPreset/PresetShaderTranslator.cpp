@@ -69,7 +69,8 @@ auto GeneratorFlags(Target target) -> unsigned int
 
 auto TranslateError(Stage stage, const std::string& message) -> Renderer::ShaderException
 {
-    return Renderer::ShaderException("[MilkdropShader] Error translating HLSL " + StageTypeString(stage) + " shader: " + message);
+    return Renderer::ShaderException("[MilkdropShader] Error translating HLSL " + StageTypeString(stage) + " shader: " + message,
+                                     Renderer::ShaderException::Kind::Translate);
 }
 
 } // namespace
@@ -364,7 +365,7 @@ auto PreprocessPresetShader(Stage stage, Target target, const std::string& code)
 
     if (program.length() <= 0)
     {
-        throw Renderer::ShaderException("[MilkdropShader] Preset " + shaderTypeString + " shader is declared, but empty.");
+        throw Renderer::ShaderException("[MilkdropShader] Preset " + shaderTypeString + " shader is declared, but empty.", Renderer::ShaderException::Kind::Translate);
     }
 
     size_t found;
@@ -441,7 +442,7 @@ void PS(float4 _vDiffuse : COLOR,
     else
     {
         LOG_DEBUG("[MilkdropShader] Failed " + shaderTypeString + " shader code:\n" + program);
-        throw Renderer::ShaderException("[MilkdropShader] Preset " + shaderTypeString + " shader is missing \"shader_body\" entry point.");
+        throw Renderer::ShaderException("[MilkdropShader] Preset " + shaderTypeString + " shader is missing \"shader_body\" entry point.", Renderer::ShaderException::Kind::Translate);
     }
 
     // replace the "{" immediately following shader_body with some variable declarations
@@ -458,7 +459,7 @@ void PS(float4 _vDiffuse : COLOR,
     else
     {
         LOG_DEBUG("[MilkdropShader] Failed " + shaderTypeString + " shader code:\n" + program);
-        throw Renderer::ShaderException("[MilkdropShader] Preset " + shaderTypeString + " shader has no opening braces.");
+        throw Renderer::ShaderException("[MilkdropShader] Preset " + shaderTypeString + " shader has no opening braces.", Renderer::ShaderException::Kind::Translate);
     }
 
     // replace "}" with return statement (this can probably be optimized for the GLSL conversion...)
@@ -471,7 +472,7 @@ void PS(float4 _vDiffuse : COLOR,
     else
     {
         LOG_DEBUG("[MilkdropShader] Failed " + shaderTypeString + " shader code:\n" + program);
-        throw Renderer::ShaderException("[MilkdropShader] Preset " + shaderTypeString + " shader has no closing brace.");
+        throw Renderer::ShaderException("[MilkdropShader] Preset " + shaderTypeString + " shader has no closing brace.", Renderer::ShaderException::Kind::Translate);
     }
 
     // Find matching closing brace and cut off excess text after shader's main function

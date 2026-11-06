@@ -24,8 +24,20 @@ namespace Renderer {
 class ShaderException : public std::exception
 {
 public:
-    ShaderException(std::string message)
+    /**
+     * @brief The step that failed.
+     */
+    enum class Kind
+    {
+        Other,     //!< Anything else.
+        Translate, //!< Preset shader preprocessing or HLSL to GLSL translation.
+        Compile,   //!< GLSL compilation.
+        Link       //!< Program linking.
+    };
+
+    ShaderException(std::string message, Kind kind = Kind::Other)
         : m_message(std::move(message))
+        , m_kind(kind)
     {
     }
 
@@ -41,8 +53,14 @@ public:
         return m_message;
     }
 
+    Kind kind() const
+    {
+        return m_kind;
+    }
+
 private:
     std::string m_message;
+    Kind m_kind{Kind::Other};
 };
 
 

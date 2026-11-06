@@ -60,6 +60,7 @@ void PerPixelMesh::LoadWarpShader(const PresetState& presetState)
             {
                 LOG_ERROR("[PerPixelMesh] Error loading warp shader code:" + ex.message());
                 LOG_DEBUG("[PerPixelMesh] Warp shader code:\n" + presetState.warpShader);
+                m_warpShaderResult.RecordFailure(ex);
                 m_warpShader.reset();
             }
         }
@@ -75,12 +76,23 @@ void PerPixelMesh::CompileWarpShader(PresetState& presetState)
             m_warpShader->LoadTexturesAndCompile(presetState);
             LOG_DEBUG("[PerPixelMesh] Successfully compiled warp shader code.");
         }
-        catch (Renderer::ShaderException&)
+        catch (Renderer::ShaderException& ex)
         {
             LOG_ERROR("[PerPixelMesh] Error compiling warp shader code.");
+            m_warpShaderResult.RecordFailure(ex);
             m_warpShader.reset();
         }
     }
+}
+
+auto PerPixelMesh::WarpShaderResult() const -> const ShaderStageResult&
+{
+    return m_warpShaderResult;
+}
+
+auto PerPixelMesh::WarpShader() const -> const MilkdropShader*
+{
+    return m_warpShader.get();
 }
 
 void PerPixelMesh::Draw(const PresetState& presetState,

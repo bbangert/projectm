@@ -59,6 +59,40 @@ typedef void (*projectm_preset_switch_failed_event)(const char* preset_filename,
 
 
 /**
+ * @brief The outcome of loading a preset, passed to the preset load result callback.
+ *
+ * A preset whose warp or composite shader fails still loads: the warp shader is replaced by the
+ * default warp, the composite shader by the default composite shader (or, if that also fails, by
+ * the classic composite effects). The failure is reported here so the application can skip it.
+ *
+ * All pointers are only valid inside the callback.
+ *
+ * @since 4.2.0
+ */
+typedef struct projectm_preset_load_result {
+    const char* preset_filename;        /**< The preset filename, or an empty string for preset data. */
+    projectm_preset_load_status status; /**< The first failure, or PROJECTM_PRESET_LOAD_OK. */
+    projectm_preset_shader_stage stage; /**< The stage of the first failure. PROJECTM_PRESET_SHADER_NONE if OK or not a shader failure. */
+    const char* message;                /**< The error message, an empty string if OK. */
+    uint32_t shader_stages;             /**< Bit mask of projectm_preset_shader_stage values: stages running a translated preset (or default composite) shader. */
+    uint32_t cached_stages;             /**< The bits of shader_stages whose GLSL was read from the shader cache, see projectm_set_shader_cache_dir(). */
+} projectm_preset_load_result;
+
+/**
+ * @brief Callback function that is executed after every preset load, successful or not.
+ *
+ * Called for projectm_load_preset_file(), projectm_load_preset_data() and the preload functions.
+ * If the preset could not be loaded at all, this callback is called before the preset switch
+ * failed callback.
+ *
+ * @param result The load result. Only valid inside the callback.
+ * @param user_data A user-defined data pointer that was provided when registering the callback,
+ *                  e.g. context information.
+ * @since 4.2.0
+ */
+typedef void (*projectm_preset_load_result_event)(const projectm_preset_load_result* result, void* user_data);
+
+/**
  * @brief Sets a callback function that will be called when a preset change is requested.
  *
  * Only one callback can be registered per projectM instance. To remove the callback, use NULL.
@@ -87,6 +121,21 @@ PROJECTM_EXPORT void projectm_set_preset_switch_requested_event_callback(project
 PROJECTM_EXPORT void projectm_set_preset_switch_failed_event_callback(projectm_handle instance,
                                                                       projectm_preset_switch_failed_event callback,
                                                                       void* user_data);
+
+/**
+ * @brief Sets a callback function that will be called with the result of every preset load.
+ *
+ * Only one callback can be registered per projectM instance. To remove the callback, use NULL.
+ *
+ * @param instance The projectM instance handle.
+ * @param callback A pointer to the callback function.
+ * @param user_data A pointer to any data that will be sent back in the callback, e.g. context
+ *                  information.
+ * @since 4.2.0
+ */
+PROJECTM_EXPORT void projectm_set_preset_load_result_event_callback(projectm_handle instance,
+                                                                    projectm_preset_load_result_event callback,
+                                                                    void* user_data);
 
 /**
  * @brief Structure containing texture data returned by the texture load callback.

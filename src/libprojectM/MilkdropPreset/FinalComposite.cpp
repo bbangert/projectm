@@ -47,6 +47,7 @@ void FinalComposite::LoadCompositeShader(const PresetState& presetState)
             catch (Renderer::ShaderException& ex)
             {
                 LOG_WARN("[FinalComposite] Error loading composite warp shader code: " + ex.message() + " - Using fallback shader.");
+                m_compositeShaderResult.RecordFailure(ex);
 
                 // Fall back to default shader
                 m_compositeShader = std::make_unique<MilkdropShader>(MilkdropShader::ShaderType::CompositeShader);
@@ -85,13 +86,35 @@ void FinalComposite::CompileCompositeShader(PresetState& presetState)
         catch (Renderer::ShaderException& ex)
         {
             LOG_WARN("[FinalComposite] Error compiling composite warp shader code - Using fallback shader.");
+            m_compositeShaderResult.RecordFailure(ex);
 
             // Fall back to default shader
-            m_compositeShader = std::make_unique<MilkdropShader>(MilkdropShader::ShaderType::CompositeShader);
-            m_compositeShader->LoadCode(PresetShaderTranslator::DefaultCompositeShader());
-            m_compositeShader->LoadTexturesAndCompile(presetState);
+            try
+            {
+                m_compositeShader = std::make_unique<MilkdropShader>(MilkdropShader::ShaderType::CompositeShader);
+                m_compositeShader->LoadCode(PresetShaderTranslator::DefaultCompositeShader());
+                m_compositeShader->LoadTexturesAndCompile(presetState);
+            }
+            catch (Renderer::ShaderException& fallbackEx)
+            {
+                // Composite the classic way, like presets without a composite shader.
+                LOG_ERROR("[FinalComposite] Error compiling fallback composite shader: " + fallbackEx.message() + " - Using video echo.");
+                m_compositeShaderResult.RecordFailure(fallbackEx);
+                m_compositeShader.reset();
+                m_videoEcho = std::make_unique<VideoEcho>(presetState);
+            }
         }
     }
+}
+
+auto FinalComposite::CompositeShaderResult() const -> const ShaderStageResult&
+{
+    return m_compositeShaderResult;
+}
+
+auto FinalComposite::CompositeShader() const -> const MilkdropShader*
+{
+    return m_compositeShader.get();
 }
 
 void FinalComposite::Draw(const PresetState& presetState, const PerFrameContext& perFrameContext)

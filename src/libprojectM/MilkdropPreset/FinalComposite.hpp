@@ -32,6 +32,16 @@ public:
     void CompileCompositeShader(PresetState& presetState);
 
     /**
+     * @brief Returns the failures of the preset composite shader, if any.
+     */
+    auto CompositeShaderResult() const -> const ShaderStageResult&;
+
+    /**
+     * @brief Returns the composite shader in use, or nullptr if the classic effects are used.
+     */
+    auto CompositeShader() const -> const MilkdropShader*;
+
+    /**
      * @brief Renders the composite quad with the appropriate effects or shaders.
      * @param presetState The preset state to retrieve the configuration values from.
      * @param presetPerFrameContext The per-frame context to retrieve the initial vars from.
@@ -94,6 +104,7 @@ private:
     int m_viewportHeight{}; //!< Last known viewport height.
 
     std::unique_ptr<MilkdropShader> m_compositeShader; //!< The composite shader. Either preset-defined or empty.
+    ShaderStageResult m_compositeShaderResult;         //!< Failures of the preset composite shader.
     std::unique_ptr<VideoEcho> m_videoEcho;            //!< Video echo effect. Used if no composite shader is loaded and video echo is enabled.
     std::unique_ptr<Filters> m_filters;                //!< Color post-processing filters. Used if no composite shader is loaded.
 };

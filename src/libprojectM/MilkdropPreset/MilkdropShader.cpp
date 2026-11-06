@@ -22,6 +22,19 @@ namespace MilkdropPreset {
 
 using libprojectM::MilkdropPreset::MilkdropStaticShaders;
 
+void ShaderStageResult::RecordFailure(const Renderer::ShaderException& exception)
+{
+    if (failed)
+    {
+        message.append(" Fallback: ").append(exception.message());
+        return;
+    }
+
+    failed = true;
+    kind = exception.kind();
+    message = exception.message();
+}
+
 static auto floatRand = []() { return static_cast<float>(rand() % 7381) / 7380.0f; };
 
 MilkdropShader::MilkdropShader(ShaderType type)

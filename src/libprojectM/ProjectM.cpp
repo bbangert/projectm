@@ -37,6 +37,7 @@
 
 #include <UserSprites/SpriteManager.hpp>
 
+#include <stdexcept>
 #include <utility>
 
 namespace libprojectM {
@@ -60,32 +61,65 @@ void ProjectM::PresetSwitchFailedEvent(const std::string&, const std::string&) c
 {
 }
 
+void ProjectM::PresetLoadResultEvent(const std::string&, const PresetLoadResult&) const
+{
+}
+
 void ProjectM::LoadPresetFile(const std::string& presetFilename, bool smoothTransition)
 {
-    try
+    auto preset = CreatePreset(presetFilename, nullptr);
+    if (preset)
     {
-        m_textureManager->PurgeTextures();
-        StartPresetTransition(m_presetFactoryManager->CreatePresetFromFile(presetFilename), !smoothTransition);
-    }
-    catch (const std::exception& ex)
-    {
-        LOG_ERROR(ex.what());
-        PresetSwitchFailedEvent(presetFilename, ex.what());
+        StartPresetTransition(std::move(preset), !smoothTransition);
     }
 }
 
 void ProjectM::LoadPresetData(std::istream& presetData, bool smoothTransition)
 {
+    auto preset = CreatePreset("", &presetData);
+    if (preset)
+    {
+        StartPresetTransition(std::move(preset), !smoothTransition);
+    }
+}
+
+auto ProjectM::CreatePreset(const std::string& presetFilename, std::istream* presetData) -> std::unique_ptr<Preset>
+{
+    std::unique_ptr<Preset> preset;
     try
     {
         m_textureManager->PurgeTextures();
-        StartPresetTransition(m_presetFactoryManager->CreatePresetFromStream(".milk", presetData), !smoothTransition);
+        if (presetData != nullptr)
+        {
+            preset = m_presetFactoryManager->CreatePresetFromStream(".milk", *presetData);
+        }
+        else
+        {
+            preset = m_presetFactoryManager->CreatePresetFromFile(presetFilename);
+        }
+
+        if (preset == nullptr)
+        {
+            throw std::runtime_error("[ProjectM] The preset factory returned no preset.");
+        }
+
+        preset->Initialize(GetRenderContext());
     }
     catch (const std::exception& ex)
     {
         LOG_ERROR(ex.what());
-        PresetSwitchFailedEvent("", ex.what());
+
+        PresetLoadResult result;
+        result.status = PresetLoadResult::Status::OtherError;
+        result.message = ex.what();
+        PresetLoadResultEvent(presetFilename, result);
+
+        PresetSwitchFailedEvent(presetFilename, ex.what());
+        return nullptr;
     }
+
+    PresetLoadResultEvent(presetFilename, preset->LoadResult());
+    return preset;
 }
 
 void ProjectM::SetTexturePaths(std::vector<std::string> texturePaths)
@@ -308,8 +342,6 @@ void ProjectM::StartPresetTransition(std::unique_ptr<Preset>&& preset, bool hard
     {
         return;
     }
-
-    preset->Initialize(GetRenderContext());
 
     // If already in a transition, force immediate completion.
     if (m_transitioningPreset != nullptr)
