@@ -94,4 +94,17 @@ if(BUILD_TESTING)
         set(_smoke_environment "EGL_PLATFORM=surfaceless")
     endif()
     set_tests_properties(projectM-gles-smoke PROPERTIES ENVIRONMENT "${_smoke_environment}")
+
+    if(USE_GLES2)
+        # The per-texture sampler state fallback must render like sampler objects, also for a
+        # texture sampled with several wrap/filter modes in one draw.
+        add_test(NAME projectM-gles2-sampler-fallback
+                COMMAND ${CMAKE_COMMAND}
+                -DSMOKE=$<TARGET_FILE:projectM-gles-smoke>
+                -DPRESET=${PROJECTM_SOURCE_DIR}/presets/tests/280-sampler-states.milk
+                -DOUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/sampler-fallback
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/CompareSamplerFallback.cmake
+                )
+        set_tests_properties(projectM-gles2-sampler-fallback PROPERTIES ENVIRONMENT "${_smoke_environment}")
+    endif()
 endif()
