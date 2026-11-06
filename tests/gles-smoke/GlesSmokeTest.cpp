@@ -12,7 +12,7 @@
  *   projectM-gles-smoke [--gbm <device>] [--size <w>x<h>] [--frames <n>] [--texture-path <dir>]
  *                       [--dump <prefix>] [--expect-failure <preset>] [--shader-cache-dir <dir>]
  *                       [--require-cached] [--expect-color <rrggbb>] [--expect-load-status <status>]
- *                       [--preset-list <file>] [--preload] <preset.milk>...
+ *                       [--preset-list <file>] [--preload] [--hard-cut] <preset.milk>...
  *
  * --require-cached fails a preset unless all its shader stages came from the shader cache,
  * --expect-color checks that the last frame is that color, --expect-load-status checks the
@@ -22,7 +22,7 @@
  * Per preset, load_ms is the time of the load call and first_ms the time of the first frame
  * after it (the GLSL backend compile usually happens on the first draw). With --preload, presets
  * are loaded with projectm_preload_preset_file() + projectm_activate_preloaded_preset(), timed
- * as preload_ms and activate_ms (load_ms is their sum).
+ * as preload_ms and activate_ms (load_ms is their sum). --hard-cut switches without blending.
  *
  * On the ES 2 backend, PROJECTM_GLES2_NO_SAMPLER_OBJECTS=1 exercises the per-texture sampler state
  * fallback.
@@ -87,6 +87,7 @@ struct Options
     unsigned char expectedColor[3]{};
     std::string expectLoadStatus;
     bool preload{false};
+    bool hardCut{false};
     std::vector<std::string> presets;
 };
 
@@ -292,6 +293,10 @@ auto ParseOptions(int argc, char** argv, Options& options) -> bool
         {
             options.preload = true;
         }
+        else if (arg == "--hard-cut")
+        {
+            options.hardCut = true;
+        }
         else if (arg == "--preset-list")
         {
             const char* listFile = next();
@@ -341,7 +346,7 @@ int main(int argc, char** argv)
     {
         std::fprintf(stderr, "usage: %s [--gbm <device>] [--size WxH] [--frames N] [--texture-path DIR] "
                              "[--dump PREFIX] [--expect-failure PRESET] [--shader-cache-dir DIR] [--require-cached] "
-                             "[--expect-color RRGGBB] [--expect-load-status STATUS[:STAGE]] [--preset-list FILE] [--preload] preset.milk...\n",
+                             "[--expect-color RRGGBB] [--expect-load-status STATUS[:STAGE]] [--preset-list FILE] [--preload] [--hard-cut] preset.milk...\n",
                      argv[0]);
         return 2;
     }
@@ -509,19 +514,20 @@ int main(int argc, char** argv)
         const size_t failuresBefore = g_switchFailures.size();
 
         g_lastLoadResult = LoadResult();
+        const bool smooth = presetIndex > 0 && !options.hardCut;
         const auto loadStart = std::chrono::steady_clock::now();
         if (options.preload)
         {
             projectm_preload_preset_file(projectM, result.preset.c_str());
             const auto activateStart = std::chrono::steady_clock::now();
-            projectm_activate_preloaded_preset(projectM, presetIndex > 0);
+            projectm_activate_preloaded_preset(projectM, smooth);
             const auto activateEnd = std::chrono::steady_clock::now();
             result.preloadMs = std::chrono::duration<double, std::milli>(activateStart - loadStart).count();
             result.activateMs = std::chrono::duration<double, std::milli>(activateEnd - activateStart).count();
         }
         else
         {
-            projectm_load_preset_file(projectM, result.preset.c_str(), presetIndex > 0);
+            projectm_load_preset_file(projectM, result.preset.c_str(), smooth);
         }
         result.loadMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - loadStart).count();
         result.switchFailed = g_switchFailures.size() != failuresBefore;
