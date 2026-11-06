@@ -1,5 +1,7 @@
 #pragma once
 
+#include "PresetLoadResult.hpp"
+
 #include <Audio/FrameAudioData.hpp>
 
 #include <Renderer/RenderContext.hpp>
@@ -16,6 +18,16 @@ public:
     virtual ~Preset() = default;
 
     /**
+     * @brief Returns the result of loading the preset and its shaders.
+     * Valid after Initialize().
+     * @return The load result.
+     */
+    virtual auto LoadResult() const -> PresetLoadResult
+    {
+        return {};
+    }
+
+    /**
      * @brief Initializes additional preset resources.
      * @param renderContext A render context with the initial data.
      */
@@ -28,6 +40,29 @@ public:
      */
     virtual void RenderFrame(const libprojectM::Audio::FrameAudioData& audioData,
                              const Renderer::RenderContext& renderContext) = 0;
+
+    /**
+     * @brief Renders a frame like RenderFrame(), but without evaluating the preset's expressions or
+     * drawing per-frame random values, so their state stays as after Initialize(). Used to warm up
+     * the preset's GL state.
+     * @param audioData Audio data to be used by the preset.
+     * @param renderContext The current render context data.
+     */
+    virtual void RenderWarmUpFrame(const libprojectM::Audio::FrameAudioData& audioData,
+                                   const Renderer::RenderContext& renderContext)
+    {
+        RenderFrame(audioData, renderContext);
+    }
+
+    /**
+     * @brief Makes the next RenderFrame() behave like the first one after Initialize().
+     * Used after a frame that rendered only part of the viewport: what it left for the next frame
+     * (feedback buffers, blur textures, the built-in waveform's audio history) is discarded or
+     * cleared. Needs the scissor test disabled. Binds the preset's framebuffers.
+     */
+    virtual void ResetFirstFrame()
+    {
+    }
 
     /**
      * @brief Returns a pointer to the current rendering output texture.

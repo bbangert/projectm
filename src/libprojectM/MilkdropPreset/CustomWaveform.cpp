@@ -78,7 +78,10 @@ void CustomWaveform::Draw(const PerFrameContext& presetPerFrameContext)
 
     // Initialize and execute per-frame code
     LoadPerFrameEvaluationVariables(presetPerFrameContext);
-    m_perFrameContext.ExecutePerFrameCode();
+    if (!m_presetState.warmUpFrame)
+    {
+        m_perFrameContext.ExecutePerFrameCode();
+    }
 
     // Copy Q and T vars to per-point context
     InitPerPointEvaluationVariables();
@@ -157,7 +160,10 @@ void CustomWaveform::Draw(const PerFrameContext& presetPerFrameContext)
         float const sampleIndex = static_cast<float>(sample) * sampleMultiplicator;
         LoadPerPointEvaluationVariables(sampleIndex, sampleDataL[sample], sampleDataR[sample]);
 
-        m_perPointContext.ExecutePerPointCode();
+        if (!m_presetState.warmUpFrame)
+        {
+            m_perPointContext.ExecutePerPointCode();
+        }
 
         points[sample] = Renderer::Point(static_cast<float>((*m_perPointContext.x * 2.0 - 1.0) * m_presetState.renderContext.invAspectX),
                                          static_cast<float>((*m_perPointContext.y * -2.0 + 1.0) * m_presetState.renderContext.invAspectY));

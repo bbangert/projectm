@@ -1,5 +1,7 @@
 #include "ProjectMCWrapper.hpp"
 
+#include "Preset.hpp"
+
 #include "Renderer/Platform/GladLoader.hpp"
 
 #include <projectM-4/projectM.h>
@@ -16,6 +18,65 @@
 
 #include <cstring>
 #include <sstream>
+
+namespace {
+
+auto ToCStatus(libprojectM::PresetLoadResult::Status status) -> projectm_preset_load_status
+{
+    using Status = libprojectM::PresetLoadResult::Status;
+    switch (status)
+    {
+        case Status::Ok:
+            return PROJECTM_PRESET_LOAD_OK;
+        case Status::TranslateError:
+            return PROJECTM_PRESET_LOAD_TRANSLATE_ERROR;
+        case Status::CompileError:
+            return PROJECTM_PRESET_LOAD_COMPILE_ERROR;
+        case Status::LinkError:
+            return PROJECTM_PRESET_LOAD_LINK_ERROR;
+        case Status::OtherError:
+        default:
+            return PROJECTM_PRESET_LOAD_OTHER_ERROR;
+    }
+}
+
+void LogCaughtException(const char* function, const char* what) noexcept
+{
+    using libprojectM::Logging;
+
+    try
+    {
+        LOG_ERROR(std::string(function) + " caught " + (what != nullptr ? std::string("exception: ") + what : std::string("unknown exception")));
+    }
+    catch (...)
+    {
+    }
+}
+
+/**
+ * @brief Calls a preset loading function, logging the exceptions it lets through.
+ *
+ * The load functions report their own failures. This only keeps exceptions from crossing the C
+ * API, e.g. a failed allocation or one thrown by a callback.
+ */
+template<typename Function>
+void CallPresetFunction(const char* name, Function&& function) noexcept
+{
+    try
+    {
+        function();
+    }
+    catch (const std::exception& e)
+    {
+        LogCaughtException(name, e.what());
+    }
+    catch (...)
+    {
+        LogCaughtException(name, nullptr);
+    }
+}
+
+} // namespace
 
 namespace libprojectM {
 
@@ -35,6 +96,25 @@ void projectMWrapper::PresetSwitchFailedEvent(const std::string& presetFilename,
         m_presetSwitchFailedEventCallback(presetFilename.c_str(),
                                           failureMessage.c_str(), m_presetSwitchFailedEventUserData);
     }
+}
+
+void projectMWrapper::PresetLoadResultEvent(const std::string& presetFilename,
+                                            const PresetLoadResult& result) const
+{
+    if (!m_presetLoadResultEventCallback)
+    {
+        return;
+    }
+
+    projectm_preset_load_result cResult{};
+    cResult.preset_filename = presetFilename.c_str();
+    cResult.status = ToCStatus(result.status);
+    cResult.stage = static_cast<projectm_preset_shader_stage>(result.stage);
+    cResult.message = result.message.c_str();
+    cResult.shader_stages = result.shaderStages;
+    cResult.cached_stages = result.cachedStages;
+
+    m_presetLoadResultEventCallback(&cResult, m_presetLoadResultEventUserData);
 }
 
 } // namespace libprojectM
@@ -122,15 +202,66 @@ void projectm_load_preset_file(projectm_handle instance, const char* filename,
                                bool smooth_transition)
 {
     auto projectMInstance = handle_to_instance(instance);
-    projectMInstance->LoadPresetFile(filename, smooth_transition);
+    CallPresetFunction("projectm_load_preset_file", [&] {
+        projectMInstance->LoadPresetFile(filename, smooth_transition);
+    });
 }
 
 void projectm_load_preset_data(projectm_handle instance, const char* data,
                                bool smooth_transition)
 {
-    std::stringstream presetDataStream(data);
     auto projectMInstance = handle_to_instance(instance);
-    projectMInstance->LoadPresetData(presetDataStream, smooth_transition);
+    CallPresetFunction("projectm_load_preset_data", [&] {
+        std::stringstream presetDataStream(data);
+        projectMInstance->LoadPresetData(presetDataStream, smooth_transition);
+    });
+}
+
+projectm_preset_load_status projectm_preload_preset_file(projectm_handle instance, const char* filename)
+{
+    auto projectMInstance = handle_to_instance(instance);
+    auto status = PROJECTM_PRESET_LOAD_OTHER_ERROR;
+    CallPresetFunction("projectm_preload_preset_file", [&] {
+        status = ToCStatus(projectMInstance->PreloadPresetFile(filename).status);
+    });
+    return status;
+}
+
+projectm_preset_load_status projectm_preload_preset_data(projectm_handle instance, const char* data)
+{
+    auto projectMInstance = handle_to_instance(instance);
+    auto status = PROJECTM_PRESET_LOAD_OTHER_ERROR;
+    CallPresetFunction("projectm_preload_preset_data", [&] {
+        std::stringstream presetDataStream(data);
+        status = ToCStatus(projectMInstance->PreloadPresetData(presetDataStream).status);
+    });
+    return status;
+}
+
+bool projectm_activate_preloaded_preset(projectm_handle instance, bool smooth_transition)
+{
+    auto projectMInstance = handle_to_instance(instance);
+    bool activated{false};
+    CallPresetFunction("projectm_activate_preloaded_preset", [&] {
+        activated = projectMInstance->ActivatePreloadedPreset(smooth_transition);
+    });
+    return activated;
+}
+
+void projectm_discard_preloaded_preset(projectm_handle instance)
+{
+    auto projectMInstance = handle_to_instance(instance);
+    CallPresetFunction("projectm_discard_preloaded_preset", [&] {
+        projectMInstance->DiscardPreloadedPreset();
+    });
+}
+
+void projectm_set_preset_load_result_event_callback(projectm_handle instance,
+                                                    projectm_preset_load_result_event callback, void* user_data)
+{
+    auto projectMInstance = handle_to_instance(instance);
+    projectMInstance->m_presetLoadResultEventCallback = callback;
+    projectMInstance->m_presetLoadResultEventUserData = user_data;
 }
 
 void projectm_set_preset_switch_requested_event_callback(projectm_handle instance,
@@ -196,6 +327,12 @@ void projectm_set_texture_search_paths(projectm_handle instance,
     }
 
     projectMInstance->SetTexturePaths(texturePaths);
+}
+
+void projectm_set_shader_cache_dir(projectm_handle instance, const char* path)
+{
+    auto projectMInstance = handle_to_instance(instance);
+    projectMInstance->SetPresetShaderCacheDirectory(path != nullptr ? path : "");
 }
 
 void projectm_reset_textures(projectm_handle instance)

@@ -22,6 +22,8 @@
 
 #include <projectM-4/projectM_cxx_export.h>
 
+#include "PresetLoadResult.hpp"
+
 #include <Renderer/RenderContext.hpp>
 #include <Renderer/TextureTypes.hpp>
 
@@ -82,6 +84,17 @@ public:
     virtual void PresetSwitchFailedEvent(const std::string& presetFilename, const std::string& message) const;
 
     /**
+     * @brief Callback for the outcome of every preset load, successful or not.
+     *
+     * Called before PresetSwitchFailedEvent() if the preset could not be loaded at all. A preset
+     * whose shaders failed still loads (with fallback shaders) and reports the failure here.
+     *
+     * @param presetFilename The filename of the preset, empty for preset data.
+     * @param result The load result.
+     */
+    virtual void PresetLoadResultEvent(const std::string& presetFilename, const PresetLoadResult& result) const;
+
+    /**
      * @brief Loads the given preset file and performs a smooth or immediate transition.
      * @param presetFilename The preset filename to load.
      * @param smoothTransition If set to true, old and new presets will be blended over smoothly.
@@ -100,6 +113,38 @@ public:
      */
     void LoadPresetData(std::istream& presetData, bool smoothTransition);
 
+    /**
+     * @brief Loads a preset and prepares it for display without switching to it.
+     *
+     * Initializes the preset (compiling its shaders) and renders one frame of it clipped to a
+     * single pixel, so shader compilation deferred to the first draw happens now. The active
+     * preset is not touched. Replaces a previously preloaded preset.
+     *
+     * @param presetFilename The preset filename or URL.
+     * @return The load result. Nothing is preloaded if the status is OtherError.
+     */
+    auto PreloadPresetFile(const std::string& presetFilename) -> PresetLoadResult;
+
+    /**
+     * @brief Like PreloadPresetFile(), with the preset read from a stream.
+     * @param presetData The preset data.
+     * @return The load result. Nothing is preloaded if the status is OtherError.
+     */
+    auto PreloadPresetData(std::istream& presetData) -> PresetLoadResult;
+
+    /**
+     * @brief Switches to the preloaded preset.
+     * If the switch fails, the preloaded preset is discarded and the failure is reported.
+     * @param smoothTransition True to blend, false for a hard cut.
+     * @return False if no preset is preloaded or the switch failed.
+     */
+    auto ActivatePreloadedPreset(bool smoothTransition) -> bool;
+
+    /**
+     * @brief Destroys the preloaded preset, if any.
+     */
+    void DiscardPreloadedPreset();
+
     void SetWindowSize(uint32_t width, uint32_t height);
 
     /**
@@ -113,6 +158,12 @@ public:
     void SetTexturePaths(std::vector<std::string> texturePaths);
 
     void ResetTextures();
+
+    /**
+     * @brief Sets the directory with pre-translated preset shaders.
+     * @param directory The directory, or an empty string to always translate.
+     */
+    void SetPresetShaderCacheDirectory(std::string directory);
 
     /**
      * @brief Sets a callback function for loading textures from non-filesystem sources.
@@ -314,6 +365,54 @@ private:
 
     void CheckGLSLVersion();
 
+    /**
+     * @brief Creates and initializes a preset. Doesn't report the result, see ReportPresetLoad().
+     * @param presetFilename The preset filename.
+     * @param presetData The preset data to load instead of the file, or nullptr.
+     * @param loadResult Receives the load result.
+     * @return The initialized preset, or nullptr if it could not be loaded.
+     */
+    auto CreatePreset(const std::string& presetFilename, std::istream* presetData,
+                      PresetLoadResult& loadResult) -> std::unique_ptr<Preset>;
+
+    /**
+     * @brief Calls PresetLoadResultEvent(), then PresetSwitchFailedEvent() if nothing was loaded.
+     * @param presetFilename The preset filename, empty for preset data.
+     * @param result The load result.
+     * @param loaded True if the preset was loaded (possibly with fallback shaders).
+     */
+    void ReportPresetLoad(const std::string& presetFilename, const PresetLoadResult& result, bool loaded);
+
+    /**
+     * @brief Creates, initializes and warms up a preset and keeps it as the preloaded preset.
+     * @param presetFilename The preset filename, also used for reporting.
+     * @param presetData The preset data to load instead of the file, or nullptr.
+     * @return The load result.
+     */
+    auto PreloadPreset(const std::string& presetFilename, std::istream* presetData) -> PresetLoadResult;
+
+    /**
+     * @brief Renders one frame of a preset clipped to one pixel, restoring the scissor state.
+     * The caller restores the framebuffer bindings and the viewport.
+     * @param preset The initialized preset.
+     */
+    void WarmUpPreset(Preset& preset);
+
+    /**
+     * @brief Switches to an initialized preset, see StartPresetTransition(), catching its errors.
+     * @param preset The initialized preset, destroyed if the switch fails.
+     * @param hardCut True to switch immediately, false to blend.
+     * @param result The load result, changed to an error if the switch fails.
+     * @return True if the switch started.
+     */
+    auto SwitchToPreset(std::unique_ptr<Preset> preset, bool hardCut, PresetLoadResult& result) -> bool;
+
+    /**
+     * @brief Switches to an initialized preset.
+     * If it throws, the active and transitioning presets and the transition are unchanged.
+     * @param preset The initialized preset.
+     * @param hardCut True to switch immediately, false to blend.
+     */
     void StartPresetTransition(std::unique_ptr<Preset>&& preset, bool hardCut);
 
     void LoadIdlePreset();
@@ -338,6 +437,7 @@ private:
     float m_texelOffsetY{0.0};       //!< Vertical warp shader texel offset
 
     std::vector<std::string> m_textureSearchPaths;     ///!< List of paths to search for texture files
+    std::string m_presetShaderCacheDirectory;          //!< Directory with pre-translated preset shaders, empty if unused.
     Renderer::TextureLoadCallback m_textureLoadCallback; //!< Optional callback for loading textures from non-filesystem sources.
 
     /** Timing information */
@@ -356,6 +456,8 @@ private:
     std::unique_ptr<Renderer::CopyTexture> m_textureCopier;                       //!< Class that copies textures 1:1 to another texture or framebuffer.
     std::unique_ptr<Preset> m_activePreset;                                       //!< Currently loaded preset.
     std::unique_ptr<Preset> m_transitioningPreset;                                //!< Destination preset when smooth preset switching.
+    std::unique_ptr<Preset> m_preloadedPreset;                                    //!< Preset prepared by PreloadPresetFile(), not yet displayed.
+    std::string m_preloadedPresetFilename;                                        //!< The filename of the preloaded preset, empty for preset data.
     std::unique_ptr<Renderer::PresetTransition> m_transition;                     //!< Transition effect used for blending.
     std::unique_ptr<TimeKeeper> m_timeKeeper;                                     //!< Keeps the different timers used to render and switch presets.
     std::unique_ptr<UserSprites::SpriteManager> m_spriteManager;                  //!< Manages all types of user sprites.

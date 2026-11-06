@@ -21,6 +21,11 @@ public:
 
     void Draw(const PerFrameContext& presetPerFrameContext);
 
+    /**
+     * @brief Forgets the audio samples kept from the previous draws, as if not drawn yet.
+     */
+    void Reset();
+
 private:
     void MaximizeColors(const PerFrameContext& presetPerFrameContext);
     void ModulateOpacityByVolume(const PerFrameContext& presetPerFrameContext);

@@ -1,0 +1,24 @@
+[preset00]
+MILKDROP_PRESET_VERSION=201
+PSVERSION=2
+PSVERSION_WARP=2
+PSVERSION_COMP=2
+fDecay=1
+warp=0
+fWaveAlpha=0
+ob_a=0
+ib_a=0
+b1n=-1
+b1x=1
+
+// Deterministic warp shader reading the previous frame and blur1 (whose range starts at -1, so
+// even a black source leaves non-zero blur texels): any image history left by a preload warm-up
+// frame changes the first frame.
+warp_1=`shader_body
+warp_2=`{
+warp_3=`ret = tex2D(sampler_main, uv).xyz * 0.5 + (GetBlur1(uv) + 1) * 0.5 + float3(0.2, 0.1, 0.3);
+warp_4=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`ret = tex2D(sampler_main, uv).xyz;
+comp_4=`}

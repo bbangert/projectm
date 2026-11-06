@@ -126,6 +126,69 @@ PROJECTM_EXPORT void projectm_load_preset_data(projectm_handle instance, const c
                                                bool smooth_transition);
 
 /**
+ * @brief Loads a preset and prepares it for display, without switching to it.
+ *
+ * Parses the preset, compiles its shaders and renders one frame of it off-screen, clipped to a
+ * single pixel, so drivers that compile shaders on the first draw (e.g. Mesa vc4) do it now
+ * instead of during the transition. That frame doesn't run the preset's code, and its images are
+ * discarded, so after activation the preset renders as if loaded with projectm_load_preset_file().
+ * The active preset and any running transition are not affected, and nothing is drawn to the
+ * application's framebuffer, so the application can keep presenting its last frame meanwhile.
+ * Switch to the preset with projectm_activate_preloaded_preset().
+ *
+ * Call it between frames with projectM's OpenGL context current. A previously preloaded preset
+ * is discarded. The framebuffer bindings, viewport, scissor state and clear color are restored on
+ * return. After the warm-up frame, the result is also reported to the preset load result callback,
+ * and to the preset switch failed callback if nothing was preloaded.
+ *
+ * @param instance The projectM instance handle.
+ * @param filename The preset filename or URL to load.
+ * @return The load status. With a shader error, the preset is preloaded with fallback shaders;
+ *         with PROJECTM_PRESET_LOAD_OTHER_ERROR, nothing is preloaded.
+ * @since 4.2.0
+ */
+PROJECTM_EXPORT projectm_preset_load_status projectm_preload_preset_file(projectm_handle instance,
+                                                                         const char* filename);
+
+/**
+ * @brief Loads a preset from the data pointer and prepares it for display, without switching to it.
+ *
+ * See projectm_preload_preset_file().
+ *
+ * @param instance The projectM instance handle.
+ * @param data The preset contents to load.
+ * @return The load status, as for projectm_preload_preset_file().
+ * @since 4.2.0
+ */
+PROJECTM_EXPORT projectm_preset_load_status projectm_preload_preset_data(projectm_handle instance,
+                                                                         const char* data);
+
+/**
+ * @brief Switches to the preloaded preset.
+ *
+ * Behaves like projectm_load_preset_file() with an already loaded preset: a running transition
+ * is finished immediately, then the preloaded preset is blended in or cut to.
+ *
+ * If the switch fails, the preloaded preset is discarded, the current preset and any running
+ * transition continue, and the failure is reported to the preset load result callback and the
+ * preset switch failed callback.
+ *
+ * @param instance The projectM instance handle.
+ * @param smooth_transition If true, the new preset is smoothly blended over.
+ * @return False if no preset is preloaded or the switch to it failed.
+ * @since 4.2.0
+ */
+PROJECTM_EXPORT bool projectm_activate_preloaded_preset(projectm_handle instance, bool smooth_transition);
+
+/**
+ * @brief Destroys the preloaded preset, if any.
+ *
+ * @param instance The projectM instance handle.
+ * @since 4.2.0
+ */
+PROJECTM_EXPORT void projectm_discard_preloaded_preset(projectm_handle instance);
+
+/**
  * @brief Reloads all textures.
  *
  * Calling this method will clear and reload all textures, including the main rendering texture.

@@ -36,6 +36,7 @@ add_executable(projectM-unittest
         PCMTest.cpp
         PerPixelWarpTest.cpp
         PresetFileParserTest.cpp
+        PresetShaderTranslatorTest.cpp
         UtilsTest.cpp
         VolumeAtlasTest.cpp
         WaveformAlignerTest.cpp

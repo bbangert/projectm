@@ -48,6 +48,25 @@ PROJECTM_EXPORT void projectm_set_texture_search_paths(projectm_handle instance,
                                                        size_t count);
 
 /**
+ * @brief Sets the directory with pre-translated preset shaders.
+ *
+ * Before translating a preset's warp or composite shader from HLSL to GLSL, projectM looks for
+ * a file named "<key>.glsl" in this directory and compiles its contents instead. The key is the
+ * SHA-256 of the translator version, the GLSL target, the shader stage, the sampler declarations
+ * and the preprocessed HLSL code, so files made by another projectM version are never used.
+ * Missing files fall back to the normal translation. projectM never writes to the directory.
+ *
+ * The files are made offline with the projectM-pretranslate-presets tool.
+ *
+ * Only affects presets loaded after the call.
+ *
+ * @param instance The projectM instance handle.
+ * @param path The cache directory. NULL or an empty string disables the lookup (the default).
+ * @since 4.2.0
+ */
+PROJECTM_EXPORT void projectm_set_shader_cache_dir(projectm_handle instance, const char* path);
+
+/**
  * @brief Sets a user-specified frame time in fractional seconds.
  *
  * Setting this to any value equal to or larger than zero will make projectM use this time value for

@@ -1,24 +1,53 @@
-# Host-only harness that translates preset shaders offline (no GL context) and checks the GLSL
-# with glslang. Not installed. See run.sh.
+# Host-only preset shader tools that run the runtime's translation code without a GL context.
+# Not installed.
+#  - projectM-translate-presets: translation + glslang validation harness, see run.sh.
+#  - projectM-pretranslate-presets: fills a shader cache directory for projectm_set_shader_cache_dir().
 
-add_executable(projectM-translate-presets
-        TranslatePresets.cpp
-        ${PROJECTM_SOURCE_DIR}/src/libprojectM/MilkdropPreset/PresetFileParser.cpp
-        ${PROJECTM_SOURCE_DIR}/src/libprojectM/Utils.cpp
+# Both link the same objects as the unit tests, so the translation code is the runtime's.
+set(_translator_objects
+        $<TARGET_OBJECTS:Audio>
+        $<TARGET_OBJECTS:MilkdropPreset>
+        $<TARGET_OBJECTS:Renderer>
+        $<TARGET_OBJECTS:UserSprites>
         $<TARGET_OBJECTS:hlslparser>
+        $<TARGET_OBJECTS:stb_image>
+        $<TARGET_OBJECTS:projectM_main>
         )
 
-target_include_directories(projectM-translate-presets
-        PRIVATE
-        "${PROJECTM_SOURCE_DIR}/src/libprojectM"
-        "${PROJECTM_SOURCE_DIR}/vendor/hlslparser/src"
-        )
+foreach(_tool IN ITEMS translate pretranslate)
+    if(_tool STREQUAL "translate")
+        set(_source TranslatePresets.cpp)
+    else()
+        set(_source PretranslatePresets.cpp)
+    endif()
 
-target_compile_definitions(projectM-translate-presets
-        PRIVATE
-        PROJECTM_PRESET_SHADER_HEADER="${PROJECTM_SOURCE_DIR}/src/libprojectM/MilkdropPreset/Shaders/PresetShaderHeaderGlsl330.inc"
-        )
+    add_executable(projectM-${_tool}-presets
+            ${_source}
+            ${_translator_objects}
+            )
 
-set_target_properties(projectM-translate-presets PROPERTIES
-        FOLDER tests
-        )
+    target_include_directories(projectM-${_tool}-presets
+            PRIVATE
+            "${PROJECTM_SOURCE_DIR}/src/libprojectM"
+            "${PROJECTM_SOURCE_DIR}/vendor/hlslparser/src"
+            )
+
+    target_link_libraries(projectM-${_tool}-presets
+            PRIVATE
+            projectM_main
+            )
+
+    set_target_properties(projectM-${_tool}-presets PROPERTIES
+            FOLDER tests
+            )
+endforeach()
+
+if(BUILD_TESTING)
+    add_test(NAME projectM-pretranslate-errors
+            COMMAND ${CMAKE_COMMAND}
+            "-DPRETRANSLATE=$<TARGET_FILE:projectM-pretranslate-presets>"
+            "-DPRESET=${PROJECTM_SOURCE_DIR}/presets/tests/270-warpcomp-shaders.milk"
+            "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/pretranslate-errors-test"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/PretranslateErrorsTest.cmake"
+            )
+endif()

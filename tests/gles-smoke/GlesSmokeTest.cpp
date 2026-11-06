@@ -11,7 +11,37 @@
  *
  * Usage:
  *   projectM-gles-smoke [--gbm <device>] [--size <w>x<h>] [--frames <n>] [--texture-path <dir>]
- *                       [--dump <prefix>] [--expect-failure <preset>] <preset.milk>...
+ *                       [--dump <prefix>] [--expect-failure <preset>] [--shader-cache-dir <dir>]
+ *                       [--require-cached] [--expect-color <rrggbb>] [--expect-load-status <status>]
+ *                       [--preset-list <file>] [--preload] [--hard-cut] [--start-clean]
+ *                       [--callback-load <preset.milk>] [--dump-first <n>] [--fail-switch <index>]
+ *                       <preset.milk>...
+ *
+ * --require-cached fails a preset unless all its shader stages came from the shader cache,
+ * --expect-color checks that the last frame is that color, --expect-load-status checks the
+ * preset load result ("ok", "translate_error", "compile_error", "link_error" or "other_error",
+ * optionally followed by ":warp" or ":comp"). --preset-list reads preset paths, one per line.
+ *
+ * Per preset, load_ms is the time of the load call and first_ms the time of the first frame
+ * after it (the GLSL backend compile usually happens on the first draw). With --preload, presets
+ * are loaded with projectm_preload_preset_file() + projectm_activate_preloaded_preset(), timed
+ * as preload_ms and activate_ms (load_ms is their sum). A failed preload or activation fails the
+ * preset unless it is expected to fail, and the preload must leave the application's framebuffer
+ * bindings, viewport, scissor state and clear color as they were. --hard-cut switches without
+ * blending, --start-clean enables projectm_set_preset_start_clean(). With --callback-load, the
+ * load result callback of each preset's load loads the given preset with a hard cut.
+ *
+ * --dump writes the last frame of each preset to <prefix><index>.ppm, and with --dump-first also
+ * its first n frames to <prefix><index>_<frame>.ppm.
+ *
+ * --fail-switch makes the switch to the preset at the given zero-based position fail, with the
+ * PROJECTM_TEST_FAIL_PRESET_SWITCH hook of a library built with BUILD_TESTING and
+ * ENABLE_GLES_SMOKE_TEST. That preset is expected to fail like with --expect-failure, except that
+ * its preload succeeds.
+ *
+ * An expected failure must also be reported to the load result callback as "other_error". With
+ * --expect-color, the frames after a failed load must still show the previous preset in that
+ * color, unless no preset was loaded before.
  *
  * On the ES 2 backend, PROJECTM_GLES2_NO_SAMPLER_OBJECTS=1 exercises the per-texture sampler state
  * fallback.
@@ -52,6 +82,18 @@
 #ifndef EGL_PLATFORM_GBM_KHR
 #define EGL_PLATFORM_GBM_KHR 0x31D7
 #endif
+#ifndef GL_READ_FRAMEBUFFER
+#define GL_READ_FRAMEBUFFER 0x8CA8
+#endif
+#ifndef GL_DRAW_FRAMEBUFFER
+#define GL_DRAW_FRAMEBUFFER 0x8CA9
+#endif
+#ifndef GL_DRAW_FRAMEBUFFER_BINDING
+#define GL_DRAW_FRAMEBUFFER_BINDING 0x8CA6
+#endif
+#ifndef GL_READ_FRAMEBUFFER_BINDING
+#define GL_READ_FRAMEBUFFER_BINDING 0x8CAA
+#endif
 
 namespace {
 
@@ -70,7 +112,28 @@ struct Options
     std::string texturePath;
     std::string dumpPrefix;
     std::set<std::string> expectFailure;
+    std::string shaderCacheDir;
+    bool requireCached{false};
+    bool expectColor{false};
+    unsigned char expectedColor[3]{};
+    std::string expectLoadStatus;
+    bool preload{false};
+    bool hardCut{false};
+    bool startClean{false};
+    std::string callbackLoad;
+    int dumpFirst{0};
+    int failSwitch{-1};
     std::vector<std::string> presets;
+};
+
+struct LoadResult
+{
+    bool reported{false};
+    projectm_preset_load_status status{PROJECTM_PRESET_LOAD_OK};
+    projectm_preset_shader_stage stage{PROJECTM_PRESET_SHADER_NONE};
+    std::string message;
+    uint32_t shaderStages{};
+    uint32_t cachedStages{};
 };
 
 struct PresetResult
@@ -83,11 +146,97 @@ struct PresetResult
     double maxMs{};
     double nonBlackFraction{};
     double meanLuma{};
+    double loadMs{};
+    double preloadMs{};
+    double activateMs{};
+    double firstFrameMs{};
+    bool preloadFailed{false};
+    bool activateFailed{false};
+    bool glStateChanged{false};
+    LoadResult load;
+    double colorMatchFraction{};
     unsigned meshUploads{};
 };
 
 std::vector<std::string> g_switchFailures;
 std::string g_lastSwitchFailureMessage;
+LoadResult g_lastLoadResult;
+projectm_handle g_projectM{};
+std::string g_callbackLoad;
+bool g_inCallbackLoad{false};
+
+auto StatusName(projectm_preset_load_status status) -> const char*
+{
+    switch (status)
+    {
+        case PROJECTM_PRESET_LOAD_OK:
+            return "ok";
+        case PROJECTM_PRESET_LOAD_TRANSLATE_ERROR:
+            return "translate_error";
+        case PROJECTM_PRESET_LOAD_COMPILE_ERROR:
+            return "compile_error";
+        case PROJECTM_PRESET_LOAD_LINK_ERROR:
+            return "link_error";
+        case PROJECTM_PRESET_LOAD_OTHER_ERROR:
+        default:
+            return "other_error";
+    }
+}
+
+auto StatusWithStage(const LoadResult& result) -> std::string
+{
+    std::string text = StatusName(result.status);
+    if (result.stage == PROJECTM_PRESET_SHADER_WARP)
+    {
+        text += ":warp";
+    }
+    else if (result.stage == PROJECTM_PRESET_SHADER_COMPOSITE)
+    {
+        text += ":comp";
+    }
+    return text;
+}
+
+void LoadResultCallback(const projectm_preset_load_result* result, void*)
+{
+    g_lastLoadResult.reported = true;
+    g_lastLoadResult.status = result->status;
+    g_lastLoadResult.stage = result->stage;
+    g_lastLoadResult.message = result->message ? result->message : "";
+    g_lastLoadResult.shaderStages = result->shader_stages;
+    g_lastLoadResult.cachedStages = result->cached_stages;
+
+    if (!g_callbackLoad.empty() && !g_inCallbackLoad)
+    {
+        g_inCallbackLoad = true;
+        projectm_load_preset_file(g_projectM, g_callbackLoad.c_str(), false);
+        g_inCallbackLoad = false;
+    }
+}
+
+auto ReadPresetList(const std::string& path, std::vector<std::string>& presets) -> bool
+{
+    FILE* file = std::fopen(path.c_str(), "r");
+    if (file == nullptr)
+    {
+        return false;
+    }
+    char line[4096];
+    while (std::fgets(line, sizeof(line), file) != nullptr)
+    {
+        std::string entry(line);
+        while (!entry.empty() && (entry.back() == '\n' || entry.back() == '\r'))
+        {
+            entry.pop_back();
+        }
+        if (!entry.empty())
+        {
+            presets.push_back(entry);
+        }
+    }
+    std::fclose(file);
+    return true;
+}
 
 void LogCallback(const char* message, projectm_log_level level, void*)
 {
@@ -101,6 +250,46 @@ void SwitchFailedCallback(const char* presetFilename, const char* message, void*
     g_switchFailures.emplace_back(presetFilename ? presetFilename : "");
     g_lastSwitchFailureMessage = message ? message : "";
 }
+
+/**
+ * Application GL state that preloading must not change: framebuffer bindings, viewport, scissor
+ * and clear color.
+ */
+struct AppGLState
+{
+    GLint drawFramebuffer{};
+    GLint readFramebuffer{};
+    GLint viewport[4]{};
+    GLint scissorBox[4]{};
+    GLboolean scissorEnabled{};
+    GLfloat clearColor[4]{};
+
+    static auto Current() -> AppGLState
+    {
+        AppGLState state;
+#ifdef PROJECTM_SMOKE_GLES2
+        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &state.drawFramebuffer);
+        state.readFramebuffer = state.drawFramebuffer;
+#else
+        glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &state.drawFramebuffer);
+        glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &state.readFramebuffer);
+#endif
+        glGetIntegerv(GL_VIEWPORT, state.viewport);
+        glGetIntegerv(GL_SCISSOR_BOX, state.scissorBox);
+        state.scissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
+        glGetFloatv(GL_COLOR_CLEAR_VALUE, state.clearColor);
+        return state;
+    }
+
+    auto operator==(const AppGLState& other) const -> bool
+    {
+        return drawFramebuffer == other.drawFramebuffer && readFramebuffer == other.readFramebuffer &&
+               std::equal(viewport, viewport + 4, other.viewport) &&
+               std::equal(scissorBox, scissorBox + 4, other.scissorBox) &&
+               scissorEnabled == other.scissorEnabled &&
+               std::equal(clearColor, clearColor + 4, other.clearColor);
+    }
+};
 
 constexpr int MeshSizeX = 48;
 constexpr int MeshSizeY = 36;
@@ -208,6 +397,63 @@ auto ParseOptions(int argc, char** argv, Options& options) -> bool
         {
             options.expectFailure.insert(next());
         }
+        else if (arg == "--shader-cache-dir")
+        {
+            options.shaderCacheDir = next();
+        }
+        else if (arg == "--require-cached")
+        {
+            options.requireCached = true;
+        }
+        else if (arg == "--expect-color")
+        {
+            unsigned int color{};
+            if (std::sscanf(next(), "%6x", &color) != 1)
+            {
+                return false;
+            }
+            options.expectColor = true;
+            options.expectedColor[0] = static_cast<unsigned char>(color >> 16);
+            options.expectedColor[1] = static_cast<unsigned char>(color >> 8);
+            options.expectedColor[2] = static_cast<unsigned char>(color);
+        }
+        else if (arg == "--expect-load-status")
+        {
+            options.expectLoadStatus = next();
+        }
+        else if (arg == "--preload")
+        {
+            options.preload = true;
+        }
+        else if (arg == "--hard-cut")
+        {
+            options.hardCut = true;
+        }
+        else if (arg == "--start-clean")
+        {
+            options.startClean = true;
+        }
+        else if (arg == "--callback-load")
+        {
+            options.callbackLoad = next();
+        }
+        else if (arg == "--dump-first")
+        {
+            options.dumpFirst = std::max(0, std::atoi(next()));
+        }
+        else if (arg == "--fail-switch")
+        {
+            options.failSwitch = std::atoi(next());
+        }
+        else if (arg == "--preset-list")
+        {
+            const char* listFile = next();
+            if (!ReadPresetList(listFile, options.presets))
+            {
+                std::fprintf(stderr, "Cannot read %s\n", listFile);
+                std::exit(2);
+            }
+        }
 
         else if (arg.rfind("--", 0) == 0)
         {
@@ -247,7 +493,9 @@ int main(int argc, char** argv)
     if (!ParseOptions(argc, argv, options))
     {
         std::fprintf(stderr, "usage: %s [--gbm <device>] [--size WxH] [--frames N] [--texture-path DIR] "
-                             "[--dump PREFIX] [--expect-failure PRESET] preset.milk...\n",
+                             "[--dump PREFIX] [--expect-failure PRESET] [--shader-cache-dir DIR] [--require-cached] "
+                             "[--expect-color RRGGBB] [--expect-load-status STATUS[:STAGE]] [--preset-list FILE] [--preload] [--hard-cut] "
+                             "[--start-clean] [--callback-load PRESET] [--dump-first N] [--fail-switch INDEX] preset.milk...\n",
                      argv[0]);
         return 2;
     }
@@ -373,6 +621,13 @@ int main(int argc, char** argv)
     }
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
+    // Bound for reading during preloads on ES 3, so restoring the read and draw bindings is checked
+    // separately.
+    GLuint readProbeFramebuffer{};
+    glGenFramebuffers(1, &readProbeFramebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, readProbeFramebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
     projectm_set_log_callback(&LogCallback, false, nullptr);
     projectm_set_log_level(PROJECTM_LOG_LEVEL_INFO, false);
 
@@ -389,8 +644,16 @@ int main(int argc, char** argv)
     projectm_set_window_size(projectM, static_cast<size_t>(options.width), static_cast<size_t>(options.height));
     projectm_set_mesh_size(projectM, MeshSizeX, MeshSizeY);
     projectm_set_preset_locked(projectM, true);
+    projectm_set_preset_start_clean(projectM, options.startClean);
     projectm_set_soft_cut_duration(projectM, 0.5);
     projectm_set_preset_switch_failed_event_callback(projectM, &SwitchFailedCallback, nullptr);
+    projectm_set_preset_load_result_event_callback(projectM, &LoadResultCallback, nullptr);
+    g_projectM = projectM;
+    g_callbackLoad = options.callbackLoad;
+    if (!options.shaderCacheDir.empty())
+    {
+        projectm_set_shader_cache_dir(projectM, options.shaderCacheDir.c_str());
+    }
     if (!options.texturePath.empty())
     {
         const char* paths[] = {options.texturePath.c_str()};
@@ -410,9 +673,59 @@ int main(int argc, char** argv)
         const size_t failuresBefore = g_switchFailures.size();
         const unsigned uploadsBefore = g_warpMeshIndexUploads;
 
-        projectm_load_preset_file(projectM, result.preset.c_str(), presetIndex > 0);
+        g_lastLoadResult = LoadResult();
+        const bool smooth = presetIndex > 0 && !options.hardCut;
+        const bool failSwitch = static_cast<int>(presetIndex) == options.failSwitch;
+        const auto loadStart = std::chrono::steady_clock::now();
+        if (options.preload)
+        {
+            // An application framebuffer and viewport, as when preloading between frames.
+#ifdef PROJECTM_SMOKE_GLES2
+            glBindFramebuffer(GL_FRAMEBUFFER, targetFramebuffer);
+#else
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, targetFramebuffer);
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, readProbeFramebuffer);
+#endif
+            glViewport(3, 5, options.width / 2, options.height / 2);
+            glEnable(GL_SCISSOR_TEST);
+            glScissor(7, 11, 13, 17);
+            glClearColor(0.25f, 0.5f, 0.75f, 1.0f);
+            const AppGLState appState = AppGLState::Current();
+
+            const auto preloadStatus = projectm_preload_preset_file(projectM, result.preset.c_str());
+            result.preloadFailed = preloadStatus == PROJECTM_PRESET_LOAD_OTHER_ERROR;
+            result.glStateChanged = !(AppGLState::Current() == appState);
+
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glViewport(0, 0, options.width, options.height);
+            glDisable(GL_SCISSOR_TEST);
+            glScissor(0, 0, options.width, options.height);
+            glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+
+            const auto activateStart = std::chrono::steady_clock::now();
+            if (failSwitch)
+            {
+                setenv("PROJECTM_TEST_FAIL_PRESET_SWITCH", "1", 1);
+            }
+            result.activateFailed = !projectm_activate_preloaded_preset(projectM, smooth);
+            unsetenv("PROJECTM_TEST_FAIL_PRESET_SWITCH");
+            const auto activateEnd = std::chrono::steady_clock::now();
+            result.preloadMs = std::chrono::duration<double, std::milli>(activateStart - loadStart).count();
+            result.activateMs = std::chrono::duration<double, std::milli>(activateEnd - activateStart).count();
+        }
+        else
+        {
+            if (failSwitch)
+            {
+                setenv("PROJECTM_TEST_FAIL_PRESET_SWITCH", "1", 1);
+            }
+            projectm_load_preset_file(projectM, result.preset.c_str(), smooth);
+            unsetenv("PROJECTM_TEST_FAIL_PRESET_SWITCH");
+        }
+        result.loadMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - loadStart).count();
         result.switchFailed = g_switchFailures.size() != failuresBefore;
         result.failureMessage = result.switchFailed ? g_lastSwitchFailureMessage : "";
+        result.load = g_lastLoadResult;
 
         std::vector<double> frameMs;
         for (int frame = 0; frame < options.frames; frame++)
@@ -441,7 +754,17 @@ int main(int argc, char** argv)
                     std::fprintf(stderr, "GL error 0x%04x after frame %d of %s\n", error, frame, result.preset.c_str());
                 }
             }
+
+            if (frame < options.dumpFirst && !options.dumpPrefix.empty())
+            {
+                glBindFramebuffer(GL_FRAMEBUFFER, targetFramebuffer);
+                glReadPixels(0, 0, options.width, options.height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+                glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                DumpPPM(options.dumpPrefix + std::to_string(presetIndex) + "_" + std::to_string(frame) + ".ppm", pixels, options.width, options.height);
+            }
         }
+
+        result.firstFrameMs = frameMs.front();
 
         // Skip the first frames (shader compiles) for the timing.
         const size_t skip = std::min<size_t>(5, frameMs.size() - 1);
@@ -462,16 +785,24 @@ int main(int argc, char** argv)
         }
 
         size_t nonBlack = 0;
+        size_t colorMatches = 0;
         double lumaSum = 0.0;
         for (size_t i = 0; i < pixels.size(); i += 4)
         {
             const int maxChannel = std::max({pixels[i], pixels[i + 1], pixels[i + 2]});
             nonBlack += maxChannel > 8 ? 1 : 0;
             lumaSum += 0.299 * pixels[i] + 0.587 * pixels[i + 1] + 0.114 * pixels[i + 2];
+            bool matches = true;
+            for (int channel = 0; channel < 3; channel++)
+            {
+                matches = matches && std::abs(static_cast<int>(pixels[i + channel]) - options.expectedColor[channel]) <= 8;
+            }
+            colorMatches += matches ? 1 : 0;
         }
         const double pixelCount = static_cast<double>(pixels.size() / 4);
         result.nonBlackFraction = static_cast<double>(nonBlack) / pixelCount;
         result.meanLuma = lumaSum / pixelCount;
+        result.colorMatchFraction = static_cast<double>(colorMatches) / pixelCount;
 
         if (!options.dumpPrefix.empty())
         {
@@ -481,18 +812,56 @@ int main(int argc, char** argv)
         result.meshUploads = g_warpMeshIndexUploads - uploadsBefore;
 
         const std::string baseName = result.preset.substr(result.preset.find_last_of('/') + 1);
-        const bool expectFailure = options.expectFailure.count(baseName) > 0;
-        bool ok = result.glErrors == 0 && result.switchFailed == expectFailure;
-        if (!result.switchFailed)
+        const bool expectFailure = failSwitch || options.expectFailure.count(baseName) > 0;
+        bool ok = result.glErrors == 0 && result.switchFailed == expectFailure && !result.glStateChanged;
+        if (options.preload)
         {
-            ok = ok && result.nonBlackFraction > 0.001;
+            ok = ok && result.preloadFailed == (expectFailure && !failSwitch) && result.activateFailed == expectFailure;
+        }
+        if (expectFailure)
+        {
+            ok = ok && result.load.reported && result.load.status == PROJECTM_PRESET_LOAD_OTHER_ERROR;
+        }
+        const bool previousPresetShown = presetIndex > 0 && std::any_of(results.begin(), results.end(), [](const PresetResult& previous) {
+            return !previous.switchFailed;
+        });
+        if (!result.switchFailed && !result.activateFailed)
+        {
+            ok = ok && (options.expectColor ? result.colorMatchFraction > 0.99 : result.nonBlackFraction > 0.001);
+        }
+        else if (options.expectColor && previousPresetShown)
+        {
+            ok = ok && result.colorMatchFraction > 0.99;
+        }
+        const std::string loadStatus = StatusWithStage(result.load);
+        if (!options.expectLoadStatus.empty())
+        {
+            ok = ok && result.load.reported &&
+                 (loadStatus == options.expectLoadStatus || StatusName(result.load.status) == options.expectLoadStatus);
+        }
+        if (options.requireCached)
+        {
+            ok = ok && result.load.cachedStages == result.load.shaderStages;
         }
         success = success && ok;
 
-        std::printf("%s %s: frames=%d mean=%.2f ms max=%.2f ms gl_errors=%u non_black=%.1f%% mean_luma=%.1f%s%s\n",
-                    ok ? "PASS" : "FAIL", baseName.c_str(), options.frames, result.meanMs, result.maxMs, result.glErrors,
-                    100.0 * result.nonBlackFraction, result.meanLuma,
+        char preloadTimes[128] = "";
+        if (options.preload)
+        {
+            std::snprintf(preloadTimes, sizeof(preloadTimes), " preload_ms=%.1f activate_ms=%.1f%s%s%s", result.preloadMs, result.activateMs,
+                          result.preloadFailed ? " preload_failed" : "", result.activateFailed ? " activate_failed" : "",
+                          result.glStateChanged ? " gl_state_changed" : "");
+        }
+        std::printf("%s %s: frames=%d load_ms=%.1f%s first_ms=%.1f mean=%.2f ms max=%.2f ms gl_errors=%u non_black=%.1f%% mean_luma=%.1f "
+                    "load=%s stages=%u cached=%u%s%s\n",
+                    ok ? "PASS" : "FAIL", baseName.c_str(), options.frames, result.loadMs, preloadTimes, result.firstFrameMs, result.meanMs, result.maxMs,
+                    result.glErrors, 100.0 * result.nonBlackFraction, result.meanLuma, loadStatus.c_str(),
+                    result.load.shaderStages, result.load.cachedStages,
                     result.switchFailed ? " switch_failed=" : "", result.switchFailed ? (expectFailure ? "expected" : result.failureMessage.c_str()) : "");
+        if (result.load.status != PROJECTM_PRESET_LOAD_OK && !result.switchFailed)
+        {
+            std::printf("    load message: %.300s\n", result.load.message.c_str());
+        }
         results.push_back(result);
     }
 
@@ -524,6 +893,7 @@ int main(int argc, char** argv)
     }
 #endif
 
+    glDeleteFramebuffers(1, &readProbeFramebuffer);
     glDeleteFramebuffers(1, &targetFramebuffer);
     glDeleteTextures(1, &targetTexture);
     eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);

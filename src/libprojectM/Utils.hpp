@@ -34,5 +34,12 @@ auto StripComments(const std::string& source) -> std::string;
  */
 void EraseRegexMatches(std::string& text, const std::string& prefix, const std::regex& pattern);
 
+/**
+ * @brief Calculates the SHA-256 digest of the given data.
+ * @param data The data to hash.
+ * @return The digest as 64 lower-case hexadecimal characters.
+ */
+auto Sha256Hex(const std::string& data) -> std::string;
+
 } // namespace Utils
 } // namespace libprojectM

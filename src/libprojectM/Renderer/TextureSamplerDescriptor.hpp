@@ -100,6 +100,21 @@ public:
     auto TexSizeDeclaration() const -> std::string;
 
     /**
+     * @brief Returns the HLSL sampler declaration for a sampler name.
+     * @param samplerName The sampler name without the "sampler_" prefix.
+     * @param volume True for a volume (3D) texture.
+     * @return The sampler declaration for use in the preset HLSL shaders.
+     */
+    static auto SamplerDeclaration(const std::string& samplerName, bool volume) -> std::string;
+
+    /**
+     * @brief Returns the HLSL texsize declaration for a texture size name.
+     * @param sizeName The texsize name without the "texsize_" prefix. Empty for no declaration.
+     * @return The texsize declaration for use in the preset HLSL shaders.
+     */
+    static auto TexSizeDeclaration(const std::string& sizeName) -> std::string;
+
+    /**
      * @brief Tries to update the texture and sampler from the given texture manager if invalid.
      * @param textureManager The texture manager to retrieve the new data from.
      */

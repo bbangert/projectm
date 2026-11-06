@@ -95,7 +95,16 @@ void Shader::CompileProgram(const std::string& vertexShaderSource,
                             const std::string& fragmentShaderSource)
 {
     auto vertexShader = CompileShader(vertexShaderSource, GL_VERTEX_SHADER);
-    auto fragmentShader = CompileShader(fragmentShaderSource, GL_FRAGMENT_SHADER);
+    GLuint fragmentShader{};
+    try
+    {
+        fragmentShader = CompileShader(fragmentShaderSource, GL_FRAGMENT_SHADER);
+    }
+    catch (const ShaderException&)
+    {
+        glDeleteShader(vertexShader);
+        throw;
+    }
 
     glAttachShader(m_shaderProgram, vertexShader);
     glAttachShader(m_shaderProgram, fragmentShader);
@@ -131,7 +140,7 @@ void Shader::CompileProgram(const std::string& vertexShaderSource,
     LOG_ERROR(linkError);
     LOG_DEBUG("[Shader] Vertex shader source: " + vertexShaderSource);
     LOG_DEBUG("[Shader] Fragment shader source: " + fragmentShaderSource);
-    throw ShaderException(linkError);
+    throw ShaderException(linkError, ShaderException::Kind::Link);
 }
 
 bool Shader::Validate(std::string& validationMessage) const
@@ -298,7 +307,7 @@ GLuint Shader::CompileShader(const std::string& source, GLenum type)
     std::string compileError = "[Shader] Error compiling " + std::string(type == GL_VERTEX_SHADER ? "vertex" : "fragment") + " shader: " + std::string(message.data());
     LOG_ERROR(compileError);
     LOG_DEBUG("[Shader] Failed source: " + source);
-    throw ShaderException(compileError);
+    throw ShaderException(compileError, ShaderException::Kind::Compile);
 }
 
 auto Shader::GetShaderLanguageVersion() -> Shader::GlslVersion

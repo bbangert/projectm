@@ -86,7 +86,10 @@ void CustomShape::Draw()
     for (int instance = 0; instance < m_instances; instance++)
     {
         m_perFrameContext.LoadStateVariables(m_presetState, *this, instance);
-        m_perFrameContext.ExecutePerFrameCode();
+        if (!m_presetState.warmUpFrame)
+        {
+            m_perFrameContext.ExecutePerFrameCode();
+        }
 
         int sides = static_cast<int>(*m_perFrameContext.sides);
         if (sides < 3)

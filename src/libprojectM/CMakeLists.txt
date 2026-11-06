@@ -54,6 +54,7 @@ add_library(projectM_main OBJECT
         PresetFactory.hpp
         PresetFactoryManager.cpp
         PresetFactoryManager.hpp
+        PresetLoadResult.hpp
         ProjectM.cpp
         ProjectM.hpp
         ProjectMCWrapper.cpp
@@ -91,6 +92,14 @@ target_include_directories(projectM_main
         "${CMAKE_CURRENT_SOURCE_DIR}/MilkdropPreset"
         "${MSVC_EXTRA_INCLUDE_DIR}"
         )
+
+if(BUILD_TESTING AND ENABLE_GLES_SMOKE_TEST)
+    # Lets the smoke test force a preset switch failure with PROJECTM_TEST_FAIL_PRESET_SWITCH.
+    target_compile_definitions(projectM_main
+            PRIVATE
+            PROJECTM_TEST_HOOKS
+            )
+endif()
 
 # CMake cannot combine multiple static libraries using target_link_libraries.
 # This syntax will pull in the compiled object files into the final library.
@@ -189,6 +198,7 @@ if(BUILD_SHARED_LIBS)
                     "${CMAKE_CURRENT_SOURCE_DIR}/Renderer/RenderContext.hpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/Renderer/TextureTypes.hpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/Logging.hpp"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/PresetLoadResult.hpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/ProjectM.hpp"
                     )
         endif()
@@ -265,6 +275,7 @@ if(ENABLE_INSTALL)
 
             install(FILES
                     Logging.hpp
+                    PresetLoadResult.hpp
                     ProjectM.hpp
                     DESTINATION "${PROJECTM_INCLUDE_DIR}/projectM-4"
                     COMPONENT Devel

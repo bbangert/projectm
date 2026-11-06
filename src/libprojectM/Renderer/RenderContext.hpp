@@ -6,6 +6,8 @@
 
 #include <projectM-4/projectM_cxx_export.h>
 
+#include <string>
+
 namespace libprojectM {
 namespace Renderer {
 
@@ -38,6 +40,8 @@ public:
 
     TextureManager* textureManager{nullptr}; //!< Holds all loaded textures for shader access.
     ShaderCache* shaderCache{nullptr}; //!< The shader chace of this projectM instance.
+
+    const std::string* presetShaderCacheDirectory{nullptr}; //!< Directory with pre-translated preset shaders. Not used if null or empty.
 };
 
 } // namespace Renderer

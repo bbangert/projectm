@@ -1,0 +1,21 @@
+[preset00]
+MILKDROP_PRESET_VERSION=201
+PSVERSION=3
+PSVERSION_WARP=3
+PSVERSION_COMP=3
+fDecay=0.98
+wave_a=1
+
+// Warp and composite shaders sharing a random texture slot, a missing user texture
+// (placeholder) with a wrap/filter prefix, and blur3.
+warp_1=`shader_body
+warp_2=`{
+warp_3=`ret = tex2D(sampler_main, uv).xyz * 0.95;
+warp_4=`ret += tex2D(sampler_rand00, uv).xyz * 0.02;
+warp_5=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`float3 r = tex2D(sampler_rand00, uv).xyz * texsize_rand00.z;
+comp_4=`float3 m = tex2D(sampler_pw_does_not_exist, uv).xyz;
+comp_5=`ret = tex2D(sampler_main, uv).xyz + GetBlur3(uv) * 0.3 + r * 0.1 + m * 0.01;
+comp_6=`}

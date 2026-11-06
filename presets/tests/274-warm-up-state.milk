@@ -1,0 +1,44 @@
+[preset00]
+MILKDROP_PRESET_VERSION=201
+PSVERSION=2
+PSVERSION_WARP=2
+PSVERSION_COMP=2
+fDecay=1
+warp=0
+fWaveAlpha=0
+ob_a=0
+ib_a=0
+
+// Per-frame, per-pixel, custom wave and custom shape code that accumulates across frames, and
+// per-frame random shader inputs: a preload warm-up frame that evaluated the code or drew random
+// numbers changes the first frame.
+per_frame_1=acc = acc + 0.25;
+per_frame_2=q1 = acc;
+per_pixel_1=pacc = pacc + 0.0001;
+per_pixel_2=dx = pacc;
+
+wavecode_0_enabled=1
+wavecode_0_samples=64
+wavecode_0_a=1
+wave_0_per_frame1=wacc = wacc + 0.25;
+wave_0_per_frame2=r = 1; g = 0.5 * wacc; b = 0; a = 1;
+wave_0_per_point1=pt = pt + 0.002;
+wave_0_per_point2=x = 0.1 + 0.8 * sample; y = 0.3 + pt;
+
+shapecode_0_enabled=1
+shapecode_0_sides=4
+shapecode_0_rad=0.1
+shapecode_0_a=1
+shapecode_0_a2=1
+shape_0_per_frame1=sacc = sacc + 0.1;
+shape_0_per_frame2=x = 0.3 + sacc; y = 0.6;
+
+warp_1=`shader_body
+warp_2=`{
+warp_3=`ret = float3(uv.x, uv.y, 0) * 0.25 + q1 * 0.2 + rand_frame.x * 0.1;
+warp_4=`ret += mul(float3(0.1, 0.2, 0.3), rot_rand1) * 0.1;
+warp_5=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`ret = tex2D(sampler_main, uv).xyz;
+comp_4=`}

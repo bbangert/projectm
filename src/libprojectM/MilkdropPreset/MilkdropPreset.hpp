@@ -72,6 +72,13 @@ public:
      */
     void Initialize(const Renderer::RenderContext& renderContext) override;
 
+    auto LoadResult() const -> PresetLoadResult override;
+
+    void RenderWarmUpFrame(const libprojectM::Audio::FrameAudioData& audioData,
+                           const Renderer::RenderContext& renderContext) override;
+
+    void ResetFirstFrame() override;
+
     /**
      * @brief Renders the preset.
      * @param audioData The frame audio data.

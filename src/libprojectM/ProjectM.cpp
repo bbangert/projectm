@@ -29,6 +29,7 @@
 #include <Audio/PCM.hpp>
 
 #include <Renderer/CopyTexture.hpp>
+#include <Renderer/OpenGL.h>
 #include <Renderer/PresetTransition.hpp>
 #include <Renderer/ShaderCache.hpp>
 #include <Renderer/TextureManager.hpp>
@@ -37,7 +38,95 @@
 
 #include <UserSprites/SpriteManager.hpp>
 
+#include <array>
+#include <cstdlib>
+#include <stdexcept>
+#include <utility>
+
 namespace libprojectM {
+
+namespace {
+
+/**
+ * @brief Saves the framebuffer bindings and the viewport, and restores them when destroyed.
+ */
+class FramebufferStateGuard
+{
+public:
+    FramebufferStateGuard()
+    {
+#ifdef USE_GLES2
+        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &m_drawFramebuffer);
+#else
+        glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &m_drawFramebuffer);
+        glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &m_readFramebuffer);
+#endif
+        glGetIntegerv(GL_VIEWPORT, m_viewport.data());
+    }
+
+    ~FramebufferStateGuard()
+    {
+#ifdef USE_GLES2
+        Rebind(GL_FRAMEBUFFER, m_drawFramebuffer);
+#else
+        Rebind(GL_DRAW_FRAMEBUFFER, m_drawFramebuffer);
+        Rebind(GL_READ_FRAMEBUFFER, m_readFramebuffer);
+#endif
+        glViewport(m_viewport[0], m_viewport[1], m_viewport[2], m_viewport[3]);
+    }
+
+    FramebufferStateGuard(const FramebufferStateGuard&) = delete;
+    auto operator=(const FramebufferStateGuard&) -> FramebufferStateGuard& = delete;
+
+private:
+    static void Rebind(GLenum target, GLint framebuffer)
+    {
+        // A framebuffer deleted meanwhile can't be bound again.
+        auto const name = static_cast<GLuint>(framebuffer);
+        glBindFramebuffer(target, name == 0 || glIsFramebuffer(name) ? name : 0);
+    }
+
+    GLint m_drawFramebuffer{};
+#ifndef USE_GLES2
+    GLint m_readFramebuffer{};
+#endif
+    std::array<GLint, 4> m_viewport{};
+};
+
+/**
+ * @brief Saves the scissor test state and box, and restores them when destroyed.
+ */
+class ScissorStateGuard
+{
+public:
+    ScissorStateGuard()
+        : m_scissorEnabled(glIsEnabled(GL_SCISSOR_TEST))
+    {
+        glGetIntegerv(GL_SCISSOR_BOX, m_scissorBox.data());
+    }
+
+    ~ScissorStateGuard()
+    {
+        glScissor(m_scissorBox[0], m_scissorBox[1], m_scissorBox[2], m_scissorBox[3]);
+        if (m_scissorEnabled)
+        {
+            glEnable(GL_SCISSOR_TEST);
+        }
+        else
+        {
+            glDisable(GL_SCISSOR_TEST);
+        }
+    }
+
+    ScissorStateGuard(const ScissorStateGuard&) = delete;
+    auto operator=(const ScissorStateGuard&) -> ScissorStateGuard& = delete;
+
+private:
+    GLboolean m_scissorEnabled{};
+    std::array<GLint, 4> m_scissorBox{};
+};
+
+} // namespace
 
 ProjectM::ProjectM()
     : m_presetFactoryManager(std::make_unique<PresetFactoryManager>())
@@ -58,31 +147,167 @@ void ProjectM::PresetSwitchFailedEvent(const std::string&, const std::string&) c
 {
 }
 
+void ProjectM::PresetLoadResultEvent(const std::string&, const PresetLoadResult&) const
+{
+}
+
 void ProjectM::LoadPresetFile(const std::string& presetFilename, bool smoothTransition)
 {
-    try
-    {
-        m_textureManager->PurgeTextures();
-        StartPresetTransition(m_presetFactoryManager->CreatePresetFromFile(presetFilename), !smoothTransition);
-    }
-    catch (const std::exception& ex)
-    {
-        LOG_ERROR(ex.what());
-        PresetSwitchFailedEvent(presetFilename, ex.what());
-    }
+    PresetLoadResult result;
+    auto preset = CreatePreset(presetFilename, nullptr, result);
+    const bool loaded = preset != nullptr && SwitchToPreset(std::move(preset), !smoothTransition, result);
+
+    // After the transition started, so a preset the callbacks load replaces this one.
+    ReportPresetLoad(presetFilename, result, loaded);
 }
 
 void ProjectM::LoadPresetData(std::istream& presetData, bool smoothTransition)
 {
+    PresetLoadResult result;
+    auto preset = CreatePreset("", &presetData, result);
+    const bool loaded = preset != nullptr && SwitchToPreset(std::move(preset), !smoothTransition, result);
+
+    // After the transition started, so a preset the callbacks load replaces this one.
+    ReportPresetLoad("", result, loaded);
+}
+
+auto ProjectM::PreloadPresetFile(const std::string& presetFilename) -> PresetLoadResult
+{
+    return PreloadPreset(presetFilename, nullptr);
+}
+
+auto ProjectM::PreloadPresetData(std::istream& presetData) -> PresetLoadResult
+{
+    return PreloadPreset("", &presetData);
+}
+
+auto ProjectM::ActivatePreloadedPreset(bool smoothTransition) -> bool
+{
+    if (!m_preloadedPreset)
+    {
+        return false;
+    }
+
+    const std::string presetFilename = std::move(m_preloadedPresetFilename);
+    m_preloadedPresetFilename.clear();
+    auto result = m_preloadedPreset->LoadResult();
+    if (SwitchToPreset(std::move(m_preloadedPreset), !smoothTransition, result))
+    {
+        return true;
+    }
+
+    // The preload already reported the successful load, so only a failed switch is reported.
+    ReportPresetLoad(presetFilename, result, false);
+    return false;
+}
+
+void ProjectM::DiscardPreloadedPreset()
+{
+    m_preloadedPreset.reset();
+    m_preloadedPresetFilename.clear();
+}
+
+auto ProjectM::PreloadPreset(const std::string& presetFilename, std::istream* presetData) -> PresetLoadResult
+{
+    PresetLoadResult result;
+    bool preloaded{false};
+    {
+        // Destroying, creating and warming up a preset binds its own framebuffers.
+        FramebufferStateGuard framebufferState;
+
+        DiscardPreloadedPreset();
+
+        auto preset = CreatePreset(presetFilename, presetData, result);
+        if (preset)
+        {
+            try
+            {
+                WarmUpPreset(*preset);
+                m_preloadedPreset = std::move(preset);
+                m_preloadedPresetFilename = presetFilename;
+                preloaded = true;
+            }
+            catch (const std::exception& ex)
+            {
+                LOG_ERROR(std::string("[ProjectM] Error warming up preset: ") + ex.what());
+                result.status = PresetLoadResult::Status::OtherError;
+                result.stage = PresetLoadResult::NoStage;
+                result.message = ex.what();
+            }
+        }
+    }
+
+    // The callbacks may load or preload another preset.
+    ReportPresetLoad(presetFilename, result, preloaded);
+    return result;
+}
+
+void ProjectM::WarmUpPreset(Preset& preset)
+{
+    if (m_windowWidth == 0 || m_windowHeight == 0)
+    {
+        return;
+    }
+
+    // One frame clipped to a single pixel: drivers that compile shader variants on the first draw
+    // (e.g. Mesa vc4) do it now, at almost no fill cost. Neither expressions nor per-frame random
+    // values are evaluated, so the first displayed frame is that of a freshly loaded preset.
+    ScissorStateGuard scissorState;
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(0, 0, 1, 1);
+    preset.RenderWarmUpFrame(m_audioStorage.GetFrameAudioData(), GetRenderContext());
+
+    // The clipped frame left mostly unwritten images (feedback buffers, blur textures, motion
+    // vector u/v map) for the next one, which must start like a freshly loaded preset.
+    glDisable(GL_SCISSOR_TEST);
+    preset.ResetFirstFrame();
+
+    glFlush();
+}
+
+auto ProjectM::CreatePreset(const std::string& presetFilename, std::istream* presetData,
+                            PresetLoadResult& loadResult) -> std::unique_ptr<Preset>
+{
+    std::unique_ptr<Preset> preset;
     try
     {
         m_textureManager->PurgeTextures();
-        StartPresetTransition(m_presetFactoryManager->CreatePresetFromStream(".milk", presetData), !smoothTransition);
+        if (presetData != nullptr)
+        {
+            preset = m_presetFactoryManager->CreatePresetFromStream(".milk", *presetData);
+        }
+        else
+        {
+            preset = m_presetFactoryManager->CreatePresetFromFile(presetFilename);
+        }
+
+        if (preset == nullptr)
+        {
+            throw std::runtime_error("[ProjectM] The preset factory returned no preset.");
+        }
+
+        preset->Initialize(GetRenderContext());
+        loadResult = preset->LoadResult();
     }
     catch (const std::exception& ex)
     {
         LOG_ERROR(ex.what());
-        PresetSwitchFailedEvent("", ex.what());
+
+        loadResult = PresetLoadResult();
+        loadResult.status = PresetLoadResult::Status::OtherError;
+        loadResult.message = ex.what();
+        return nullptr;
+    }
+
+    return preset;
+}
+
+void ProjectM::ReportPresetLoad(const std::string& presetFilename, const PresetLoadResult& result, bool loaded)
+{
+    PresetLoadResultEvent(presetFilename, result);
+    if (!loaded)
+    {
+        PresetSwitchFailedEvent(presetFilename, result.message);
     }
 }
 
@@ -103,6 +328,11 @@ void ProjectM::ResetTextures()
     {
         m_textureManager->SetTextureLoadCallback(m_textureLoadCallback);
     }
+}
+
+void ProjectM::SetPresetShaderCacheDirectory(std::string directory)
+{
+    m_presetShaderCacheDirectory = std::move(directory);
 }
 
 void ProjectM::SetTextureLoadCallback(Renderer::TextureLoadCallback callback)
@@ -293,39 +523,77 @@ void ProjectM::SetWindowSize(uint32_t width, uint32_t height)
     m_windowHeight = height;
 }
 
+auto ProjectM::SwitchToPreset(std::unique_ptr<Preset> preset, bool hardCut, PresetLoadResult& result) -> bool
+{
+    try
+    {
+        StartPresetTransition(std::move(preset), hardCut);
+        return true;
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_ERROR(std::string("[ProjectM] Error switching to preset: ") + ex.what());
+        result.message = ex.what();
+    }
+    catch (...)
+    {
+        LOG_ERROR("[ProjectM] Unknown error switching to preset.");
+        result.message = "Unknown error switching to the preset.";
+    }
+
+    result.status = PresetLoadResult::Status::OtherError;
+    result.stage = PresetLoadResult::NoStage;
+    return false;
+}
+
 void ProjectM::StartPresetTransition(std::unique_ptr<Preset>&& preset, bool hardCut)
 {
-    m_presetChangeNotified = m_presetLocked;
-
     if (preset == nullptr)
     {
         return;
     }
 
-    preset->Initialize(GetRenderContext());
+    // Everything that can throw comes first, so a failure leaves the displayed presets and any
+    // running transition as they were. A running transition is finished by this switch, so its
+    // destination preset is the image the new preset starts from.
+    auto* const previousPreset = m_transitioningPreset != nullptr ? m_transitioningPreset.get() : m_activePreset.get();
+    if (previousPreset != nullptr && !m_presetStartClean)
+    {
+        preset->DrawInitialImage(previousPreset->OutputTexture(), GetRenderContext());
+    }
+
+#ifdef PROJECTM_TEST_HOOKS
+    if (std::getenv("PROJECTM_TEST_FAIL_PRESET_SWITCH") != nullptr)
+    {
+        throw std::runtime_error("Preset switch failure forced by PROJECTM_TEST_FAIL_PRESET_SWITCH.");
+    }
+#endif
+
+    std::unique_ptr<Renderer::PresetTransition> transition;
+    if (!hardCut)
+    {
+        transition = std::make_unique<Renderer::PresetTransition>(m_transitionShaderManager->RandomTransition(), m_softCutDuration, m_timeKeeper->GetFrameTime());
+    }
+
+    m_presetChangeNotified = m_presetLocked;
 
     // If already in a transition, force immediate completion.
     if (m_transitioningPreset != nullptr)
     {
         m_activePreset = std::move(m_transitioningPreset);
-        m_transition.reset();
-    }
-
-    if (m_activePreset && !m_presetStartClean)
-    {
-        preset->DrawInitialImage(m_activePreset->OutputTexture(), GetRenderContext());
     }
 
     if (hardCut)
     {
         m_activePreset = std::move(preset);
+        m_transition.reset();
         m_timeKeeper->StartPreset();
     }
     else
     {
         m_transitioningPreset = std::move(preset);
+        m_transition = std::move(transition);
         m_timeKeeper->StartSmoothing();
-        m_transition = std::make_unique<Renderer::PresetTransition>(m_transitionShaderManager->RandomTransition(), m_softCutDuration, m_timeKeeper->GetFrameTime());
     }
 }
 
@@ -641,6 +909,7 @@ auto ProjectM::GetRenderContext() -> Renderer::RenderContext
 
     ctx.textureManager = m_textureManager.get();
     ctx.shaderCache = m_shaderCache.get();
+    ctx.presetShaderCacheDirectory = &m_presetShaderCacheDirectory;
 
     if (m_transition)
     {

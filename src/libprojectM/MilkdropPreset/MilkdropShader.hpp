@@ -8,6 +8,7 @@
 #pragma once
 
 #include "BlurTexture.hpp"
+#include "PresetShaderTranslator.hpp"
 
 #include <Renderer/Shader.hpp>
 #include <Renderer/TextureManager.hpp>
@@ -23,6 +24,22 @@ namespace MilkdropPreset {
 
 class PerFrameContext;
 class PresetState;
+
+/**
+ * @brief Records the first shader failure of a preset shader stage.
+ */
+struct ShaderStageResult
+{
+    bool failed{false};                                                           //!< True if a shader of this stage failed.
+    Renderer::ShaderException::Kind kind{Renderer::ShaderException::Kind::Other}; //!< The step that failed first.
+    std::string message;                                                          //!< The first error message, plus any fallback errors.
+
+    /**
+     * @brief Records a failure. Later failures, e.g. of a fallback shader, only extend the message.
+     * @param exception The shader exception.
+     */
+    void RecordFailure(const Renderer::ShaderException& exception);
+};
 
 /**
  * @brief Holds a warp or composite shader of Milkdrop presets.
@@ -73,25 +90,29 @@ public:
      */
     auto Shader() -> Renderer::Shader&;
 
+    /**
+     * @brief Returns whether the GLSL code was read from the pre-translated shader cache.
+     * @return True if LoadTexturesAndCompile() used a cached GLSL file instead of translating.
+     */
+    auto LoadedFromCache() const -> bool;
+
 private:
     /**
-     * @brief Prepares the shader code to be translated into GLSL.
-     * @param program The program code to work on.
+     * @brief Returns the translator stage of this shader.
      */
-    void PreprocessPresetShader(std::string& program);
+    auto Stage() const -> PresetShaderTranslator::Stage;
 
     /**
-     * @brief Searches for sampler references in the program and stores them in m_samplerNames.
-     * @param program The program code to work on.
+     * @brief Returns the max blur level of the main texture required by this shader.
      */
-    void GetReferencedSamplers(const std::string& program);
+    auto MaxBlurLevel() const -> BlurTexture::BlurLevel;
 
     /**
-     * @brief Translates the HLSL shader into GLSL.
+     * @brief Translates the HLSL shader into GLSL and compiles it.
      * @param presetState The preset state to pull the blur textures from.
-     * @param program The shader to transpile.
+     * @param program The preprocessed shader to transpile.
      */
-    void TranspileHLSLShader(const PresetState& presetState, std::string& program);
+    void TranspileHLSLShader(const PresetState& presetState, const std::string& program);
 
     /**
      * @brief Updates the requested blur level if higher than before.
@@ -115,11 +136,11 @@ private:
     ShaderType m_type{ShaderType::WarpShader}; //!< Type of this shader.
     std::string m_fragmentShaderCode;          //!< The original preset fragment shader code.
     std::string m_preprocessedCode;            //!< The preprocessed preset shader code.
+    bool m_loadedFromCache{false};             //!< True if the GLSL code came from the shader cache.
 
-    std::set<std::string> m_samplerNames;                                        //!< All sampler names referenced in the shader code.
-    std::vector<Renderer::TextureSamplerDescriptor> m_mainTextureDescriptors;              //!< Descriptors for all main texture references.
-    std::vector<Renderer::TextureSamplerDescriptor> m_textureSamplerDescriptors;           //!< Descriptors of all referenced samplers in the shader code.
-    BlurTexture::BlurLevel m_maxBlurLevelRequired{BlurTexture::BlurLevel::None}; //!< Max blur level of main texture required by this shader.
+    PresetShaderTranslator::SamplerReferences m_samplers;                      //!< All sampler names referenced in the shader code and the blur level.
+    std::vector<Renderer::TextureSamplerDescriptor> m_mainTextureDescriptors;    //!< Descriptors for all main texture references.
+    std::vector<Renderer::TextureSamplerDescriptor> m_textureSamplerDescriptors; //!< Descriptors of all referenced samplers in the shader code.
 #ifdef USE_GLES2
     Renderer::TextureStateCopies m_textureStateCopies; //!< Per-mode texture copies when sampler objects are unavailable.
 #endif

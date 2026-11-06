@@ -1,5 +1,6 @@
 #include "FinalComposite.hpp"
 
+#include "PresetShaderTranslator.hpp"
 #include "PresetState.hpp"
 
 #include <Logging.hpp>
@@ -10,7 +11,6 @@
 namespace libprojectM {
 namespace MilkdropPreset {
 
-static std::string const defaultCompositeShader = "shader_body\n{\nret = tex2D(sampler_main, uv).xyz;\n}";
 
 FinalComposite::FinalComposite()
     : m_compositeMesh(Renderer::VertexBufferUsage::StreamDraw, true, true)
@@ -47,29 +47,35 @@ void FinalComposite::LoadCompositeShader(const PresetState& presetState)
             catch (Renderer::ShaderException& ex)
             {
                 LOG_WARN("[FinalComposite] Error loading composite warp shader code: " + ex.message() + " - Using fallback shader.");
+                m_compositeShaderResult.RecordFailure(ex);
 
                 // Fall back to default shader
                 m_compositeShader = std::make_unique<MilkdropShader>(MilkdropShader::ShaderType::CompositeShader);
-                m_compositeShader->LoadCode(defaultCompositeShader);
+                m_compositeShader->LoadCode(PresetShaderTranslator::DefaultCompositeShader());
             }
         }
         else
         {
             LOG_DEBUG("[FinalComposite] No composite shader code in preset, loading default.");
-            m_compositeShader->LoadCode(defaultCompositeShader);
+            m_compositeShader->LoadCode(PresetShaderTranslator::DefaultCompositeShader());
         }
     }
     else
     {
-        // Video echo OR gamma adjustment with random hue.
-        m_videoEcho = std::make_unique<VideoEcho>(presetState);
-        if (presetState.brighten ||
-            presetState.darken ||
-            presetState.solarize ||
-            presetState.invert)
-        {
-            m_filters = std::make_unique<Filters>(presetState);
-        }
+        CreateClassicEffects(presetState);
+    }
+}
+
+void FinalComposite::CreateClassicEffects(const PresetState& presetState)
+{
+    // Video echo OR gamma adjustment with random hue.
+    m_videoEcho = std::make_unique<VideoEcho>(presetState);
+    if (presetState.brighten ||
+        presetState.darken ||
+        presetState.solarize ||
+        presetState.invert)
+    {
+        m_filters = std::make_unique<Filters>(presetState);
     }
 }
 
@@ -85,13 +91,35 @@ void FinalComposite::CompileCompositeShader(PresetState& presetState)
         catch (Renderer::ShaderException& ex)
         {
             LOG_WARN("[FinalComposite] Error compiling composite warp shader code - Using fallback shader.");
+            m_compositeShaderResult.RecordFailure(ex);
 
             // Fall back to default shader
-            m_compositeShader = std::make_unique<MilkdropShader>(MilkdropShader::ShaderType::CompositeShader);
-            m_compositeShader->LoadCode(defaultCompositeShader);
-            m_compositeShader->LoadTexturesAndCompile(presetState);
+            try
+            {
+                m_compositeShader = std::make_unique<MilkdropShader>(MilkdropShader::ShaderType::CompositeShader);
+                m_compositeShader->LoadCode(PresetShaderTranslator::DefaultCompositeShader());
+                m_compositeShader->LoadTexturesAndCompile(presetState);
+            }
+            catch (Renderer::ShaderException& fallbackEx)
+            {
+                // Composite the classic way, like presets without a composite shader.
+                LOG_ERROR("[FinalComposite] Error compiling fallback composite shader: " + fallbackEx.message() + " - Using the classic composite.");
+                m_compositeShaderResult.RecordFailure(fallbackEx);
+                m_compositeShader.reset();
+                CreateClassicEffects(presetState);
+            }
         }
     }
+}
+
+auto FinalComposite::CompositeShaderResult() const -> const ShaderStageResult&
+{
+    return m_compositeShaderResult;
+}
+
+auto FinalComposite::CompositeShader() const -> const MilkdropShader*
+{
+    return m_compositeShader.get();
 }
 
 void FinalComposite::Draw(const PresetState& presetState, const PerFrameContext& perFrameContext)

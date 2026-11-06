@@ -1,0 +1,265 @@
+// Pre-translates the warp and composite shaders of MilkDrop presets into a shader cache directory
+// for projectm_set_shader_cache_dir().
+//
+// Usage: projectM-pretranslate-presets [--target es100|es300|glsl330] <out_dir> <preset dir or file>...
+//
+// Writes <out_dir>/shaders/<key>.glsl per translated stage, with the runtime's cache key and
+// translation code. The default composite shader (used by presets without one and as the
+// fallback) is always written. Assumes every texture a preset references exists at runtime;
+// a missing random texture makes the runtime key differ, which only costs a translation.
+//
+// Prints one TSV row per stage: path (relative to its preset dir), stage, status (ok|err), key,
+// error message. Exits 1 if a preset directory or preset file can't be read or a shader file can't
+// be written, 2 on usage errors.
+
+#include "MilkdropPreset/PresetFileParser.hpp"
+#include "MilkdropPreset/PresetShaderTranslator.hpp"
+#include "Utils.hpp"
+
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <map>
+#include <set>
+#include <string>
+#include <vector>
+
+namespace {
+
+using libprojectM::MilkdropPreset::PresetFileParser;
+namespace Translator = libprojectM::MilkdropPreset::PresetShaderTranslator;
+namespace fs = std::filesystem;
+
+struct PresetFile
+{
+    fs::path path;
+    std::string displayPath;
+};
+
+auto OneLine(std::string text) -> std::string
+{
+    std::replace_if(text.begin(), text.end(), [](char c) { return c == '\t' || c == '\n' || c == '\r'; }, ' ');
+    return text;
+}
+
+// Returns the exit code: 0 if all inputs were read, 1 on a traversal error, 2 for a bad input.
+auto CollectPresets(const std::vector<std::string>& inputs, std::vector<PresetFile>& presets) -> int
+{
+    for (const auto& input : inputs)
+    {
+        fs::path const inputPath(input);
+        std::error_code error;
+        if (fs::is_directory(inputPath, error))
+        {
+            std::vector<PresetFile> found;
+            for (fs::recursive_directory_iterator it(inputPath, error), end; it != end && !error; it.increment(error))
+            {
+                std::error_code typeError;
+                bool const isFile = it->is_regular_file(typeError);
+                // A dangling symlink is not found, which is no reason to stop.
+                if (typeError && typeError != std::errc::no_such_file_or_directory)
+                {
+                    std::cerr << "cannot read " << it->path().string() << ": " << typeError.message() << "\n";
+                    return 1;
+                }
+                if (isFile && libprojectM::Utils::ToLower(it->path().extension().string()) == ".milk")
+                {
+                    found.push_back({it->path(), it->path().lexically_relative(inputPath).generic_string()});
+                }
+            }
+            if (error)
+            {
+                // The iterator is the end iterator after an error, so only the input is known.
+                std::cerr << "cannot read all of " << input << ": " << error.message() << "\n";
+                return 1;
+            }
+            std::sort(found.begin(), found.end(), [](const PresetFile& a, const PresetFile& b) { return a.displayPath < b.displayPath; });
+            presets.insert(presets.end(), found.begin(), found.end());
+        }
+        else if (fs::is_regular_file(inputPath, error))
+        {
+            presets.push_back({inputPath, inputPath.filename().generic_string()});
+        }
+        else
+        {
+            std::cerr << "not a preset file or directory: " << input << "\n";
+            return 2;
+        }
+    }
+    return 0;
+}
+
+class Pretranslator
+{
+public:
+    Pretranslator(Translator::Target target, fs::path shaderDir)
+        : m_target(target)
+        , m_shaderDir(std::move(shaderDir))
+    {
+    }
+
+    // Translates one stage like MilkdropShader::LoadCode + LoadTexturesAndCompile and prints its row.
+    // Returns false only if the GLSL file can't be written.
+    auto Stage(const std::string& displayPath, Translator::Stage stage, const std::string& code,
+               std::map<int, std::string>& randomSlotNames) -> bool
+    {
+        std::string key;
+        std::string error;
+        bool written = true;
+        try
+        {
+            auto references = Translator::GetReferencedSamplers(code);
+            auto const program = Translator::PreprocessPresetShader(stage, m_target, code);
+            auto const declarations = Translator::OfflineDeclarations(references, randomSlotNames);
+            key = Translator::CacheKey(stage, m_target, program, declarations);
+            if (m_written.count(key) == 0)
+            {
+                auto const glsl = Translator::TranslateToGlsl(stage, m_target, program, declarations);
+                written = Write(key, glsl);
+            }
+        }
+        catch (const std::exception& e)
+        {
+            error = e.what();
+        }
+
+        std::cout << displayPath << "\t" << Translator::StageName(stage) << "\t" << (error.empty() ? "ok" : "err") << "\t"
+                  << key << "\t" << OneLine(error) << "\n";
+        return written;
+    }
+
+    // Returns false if the preset file can't be read or a GLSL file can't be written.
+    auto Preset(const PresetFile& preset) -> bool
+    {
+        PresetFileParser parser;
+        std::ifstream stream(preset.path, std::ios::in | std::ios::binary);
+        if (!stream || !parser.Read(stream))
+        {
+            // A readable file is only rejected if it's too large, as by the runtime.
+            bool const unreadable = !stream;
+            std::cout << preset.displayPath << "\twarp\terr\t\t" << (unreadable ? "cannot read preset" : "cannot parse preset") << "\n";
+            if (unreadable)
+            {
+                std::cerr << "cannot read " << preset.path.string() << "\n";
+            }
+            return !unreadable;
+        }
+
+        auto const sources = Translator::ReadStageSources(parser);
+        std::map<int, std::string> randomSlotNames;
+        bool ok = true;
+
+        // Same order and conditions as PerPixelMesh::LoadWarpShader and FinalComposite::LoadCompositeShader.
+        if (sources.warpVersion > 0 && !sources.warpCode.empty())
+        {
+            ok = Stage(preset.displayPath, Translator::Stage::Warp, sources.warpCode, randomSlotNames) && ok;
+        }
+        if (sources.compositeVersion > 0 && !sources.compositeCode.empty())
+        {
+            ok = Stage(preset.displayPath, Translator::Stage::Composite, sources.compositeCode, randomSlotNames) && ok;
+        }
+        return ok;
+    }
+
+    auto DefaultComposite() -> bool
+    {
+        std::map<int, std::string> randomSlotNames;
+        return Stage("(default)", Translator::Stage::Composite, Translator::DefaultCompositeShader(), randomSlotNames);
+    }
+
+    auto Count() const -> size_t
+    {
+        return m_written.size();
+    }
+
+private:
+    auto Write(const std::string& key, const std::string& glsl) -> bool
+    {
+        fs::path const path = m_shaderDir / Translator::CacheFileName(key);
+        fs::path const temporaryPath = path.string() + ".tmp";
+        {
+            std::ofstream file(temporaryPath, std::ios::out | std::ios::binary | std::ios::trunc);
+            file << glsl;
+            // Closing flushes, which is where a small write fails, e.g. on a full filesystem.
+            file.close();
+            if (!file)
+            {
+                std::cerr << "cannot write " << temporaryPath << "\n";
+                std::error_code removeError;
+                fs::remove(temporaryPath, removeError);
+                return false;
+            }
+        }
+        std::error_code error;
+        fs::rename(temporaryPath, path, error);
+        if (error)
+        {
+            std::cerr << "cannot rename " << temporaryPath << ": " << error.message() << "\n";
+            return false;
+        }
+        m_written.insert(key);
+        return true;
+    }
+
+    Translator::Target m_target;
+    fs::path m_shaderDir;
+    std::set<std::string> m_written;
+};
+
+} // namespace
+
+int main(int argc, char** argv)
+{
+    Translator::Target target = Translator::RuntimeTarget();
+    std::vector<std::string> arguments;
+    for (int i = 1; i < argc; i++)
+    {
+        std::string const argument = argv[i];
+        if (argument == "--target" && i + 1 < argc)
+        {
+            if (!Translator::TargetFromName(argv[++i], target))
+            {
+                std::cerr << "unknown target " << argv[i] << "\n";
+                return 2;
+            }
+        }
+        else
+        {
+            arguments.push_back(argument);
+        }
+    }
+    if (arguments.size() < 2)
+    {
+        std::cerr << "usage: " << argv[0] << " [--target es100|es300|glsl330] <out_dir> <preset dir or file>...\n";
+        return 2;
+    }
+
+    std::vector<PresetFile> presets;
+    int const collectResult = CollectPresets({arguments.begin() + 1, arguments.end()}, presets);
+    if (collectResult != 0)
+    {
+        return collectResult;
+    }
+
+    fs::path const shaderDir = fs::path(arguments.front()) / "shaders";
+    std::error_code error;
+    fs::create_directories(shaderDir, error);
+    if (error)
+    {
+        std::cerr << "cannot create " << shaderDir << ": " << error.message() << "\n";
+        return 1;
+    }
+
+    Pretranslator pretranslator(target, shaderDir);
+    std::cout << "path\tstage\tstatus\tkey\terror\n";
+    bool ok = pretranslator.DefaultComposite();
+    for (const auto& preset : presets)
+    {
+        ok = pretranslator.Preset(preset) && ok;
+    }
+
+    std::cerr << "Translator " << Translator::TranslatorVersion() << ", target " << Translator::TargetName(target) << ": "
+              << presets.size() << " presets, " << pretranslator.Count() << " shaders in " << shaderDir.string() << "\n";
+    return ok ? 0 : 1;
+}
