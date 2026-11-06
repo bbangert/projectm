@@ -83,6 +83,7 @@ struct PresetResult
     double maxMs{};
     double nonBlackFraction{};
     double meanLuma{};
+    unsigned meshUploads{};
 };
 
 std::vector<std::string> g_switchFailures;
@@ -407,6 +408,7 @@ int main(int argc, char** argv)
         PresetResult result;
         result.preset = options.presets[presetIndex];
         const size_t failuresBefore = g_switchFailures.size();
+        const unsigned uploadsBefore = g_warpMeshIndexUploads;
 
         projectm_load_preset_file(projectM, result.preset.c_str(), presetIndex > 0);
         result.switchFailed = g_switchFailures.size() != failuresBefore;
@@ -476,6 +478,8 @@ int main(int argc, char** argv)
             DumpPPM(options.dumpPrefix + std::to_string(presetIndex) + ".ppm", pixels, options.width, options.height);
         }
 
+        result.meshUploads = g_warpMeshIndexUploads - uploadsBefore;
+
         const std::string baseName = result.preset.substr(result.preset.find_last_of('/') + 1);
         const bool expectFailure = options.expectFailure.count(baseName) > 0;
         bool ok = result.glErrors == 0 && result.switchFailed == expectFailure;
@@ -501,9 +505,21 @@ int main(int argc, char** argv)
     }
     std::printf("Warp mesh index buffer uploads: %u for %zu loaded presets\n", g_warpMeshIndexUploads, loadedPresets);
 #ifdef PROJECTM_SMOKE_GLES2
-    if (loadedPresets > 0 && (g_warpMeshIndexUploads == 0 || g_warpMeshIndexUploads > loadedPresets))
+    // The mesh is uploaded once per rendered preset. A preset that fails to load leaves projectM's
+    // idle preset rendering, which uploads its own mesh, so the count is checked per supplied
+    // preset: at most one new upload each, and some upload for the loaded ones overall.
+    for (const auto& result : results)
     {
-        std::fprintf(stderr, "FAIL: expected one warp mesh index buffer upload per loaded preset\n");
+        if (result.meshUploads > 1)
+        {
+            std::fprintf(stderr, "FAIL: %u warp mesh index buffer uploads for %s, expected at most one\n", result.meshUploads,
+                         result.preset.c_str());
+            success = false;
+        }
+    }
+    if (loadedPresets > 0 && g_warpMeshIndexUploads == 0)
+    {
+        std::fprintf(stderr, "FAIL: expected a warp mesh index buffer upload for the loaded presets\n");
         success = false;
     }
 #endif
