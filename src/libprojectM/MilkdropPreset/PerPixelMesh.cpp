@@ -4,6 +4,7 @@
 #include "MilkdropStaticShaders.hpp"
 #include "PerFrameContext.hpp"
 #include "PerPixelContext.hpp"
+#include "PerPixelWarp.hpp"
 #include "PresetState.hpp"
 
 #include <Logging.hpp>
@@ -16,12 +17,42 @@
 namespace libprojectM {
 namespace MilkdropPreset {
 
+namespace {
+
+auto GetWarpFrameParameters(const PresetState& presetState) -> WarpFrameParameters
+{
+    WarpFrameParameters frame;
+    frame.aspectX = presetState.renderContext.aspectX;
+    frame.aspectY = presetState.renderContext.aspectY;
+    frame.invAspectX = presetState.renderContext.invAspectX;
+    frame.invAspectY = presetState.renderContext.invAspectY;
+    frame.warpTime = presetState.renderContext.time * presetState.warpAnimSpeed;
+    frame.warpScaleInverse = 1.0f / presetState.warpScale;
+    frame.warpFactors[0] = 11.68f + 4.0f * cosf(frame.warpTime * 1.413f + 10);
+    frame.warpFactors[1] = 8.77f + 3.0f * cosf(frame.warpTime * 1.113f + 7);
+    frame.warpFactors[2] = 10.54f + 3.0f * cosf(frame.warpTime * 1.233f + 3);
+    frame.warpFactors[3] = 11.49f + 4.0f * cosf(frame.warpTime * 0.933f + 5);
+    frame.texelOffsetX = presetState.renderContext.texelOffsetX / static_cast<float>(presetState.renderContext.viewportSizeX);
+    frame.texelOffsetY = presetState.renderContext.texelOffsetY / static_cast<float>(presetState.renderContext.viewportSizeY);
+    return frame;
+}
+
+} // namespace
+
 PerPixelMesh::PerPixelMesh()
     : m_warpMesh(Renderer::VertexBufferUsage::StreamDraw)
 {
     m_warpMesh.SetRenderPrimitiveType(Renderer::Mesh::PrimitiveType::Triangles);
 
     m_warpMesh.Bind();
+#ifdef USE_GLES2
+    // The u/v coordinates are computed on the CPU, so the shader only needs them and rad/ang.
+    m_radiusAngleBuffer.InitializeAttributePointer(3);
+    m_warpUVBuffer.InitializeAttributePointer(4);
+
+    Renderer::VertexBuffer<Renderer::Point>::SetEnableAttributeArray(3, true);
+    Renderer::VertexBuffer<Renderer::Point>::SetEnableAttributeArray(4, true);
+#else
     m_radiusAngleBuffer.Bind();
     m_zoomRotWarpBuffer.Bind();
     m_centerBuffer.Bind();
@@ -39,6 +70,7 @@ PerPixelMesh::PerPixelMesh()
     Renderer::VertexBuffer<Renderer::Point>::SetEnableAttributeArray(5, true);
     Renderer::VertexBuffer<Renderer::Point>::SetEnableAttributeArray(6, true);
     Renderer::VertexBuffer<Renderer::Point>::SetEnableAttributeArray(7, true);
+#endif
 
     Renderer::Mesh::Unbind();
 }
@@ -130,22 +162,34 @@ void PerPixelMesh::InitializeMesh(const PresetState& presetState)
 
         m_warpMesh.SetVertexCount(vertexCount);
         m_radiusAngleBuffer.Resize(vertexCount);
+#ifdef USE_GLES2
+        m_warpUVBuffer.Resize(vertexCount);
+        m_warpUVsValid = false;
+#else
         m_zoomRotWarpBuffer.Resize(vertexCount);
         m_centerBuffer.Resize(vertexCount);
         m_distanceBuffer.Resize(vertexCount);
         m_stretchBuffer.Resize(vertexCount);
+#endif
 
         m_warpMesh.Indices().Resize(m_gridSizeX * m_gridSizeY * 6);
     }
     else if (m_viewportWidth == presetState.renderContext.viewportSizeX &&
-             m_viewportHeight == presetState.renderContext.viewportSizeY)
+             m_viewportHeight == presetState.renderContext.viewportSizeY &&
+             m_aspectX == presetState.renderContext.aspectX &&
+             m_aspectY == presetState.renderContext.aspectY)
     {
         // Nothing changed, just go on to the dynamic calculation.
         return;
     }
 
-    const float aspectX = presetState.renderContext.aspectX;
-    const float aspectY = presetState.renderContext.aspectY;
+    m_viewportWidth = presetState.renderContext.viewportSizeX;
+    m_viewportHeight = presetState.renderContext.viewportSizeY;
+    m_aspectX = presetState.renderContext.aspectX;
+    m_aspectY = presetState.renderContext.aspectY;
+
+    const float aspectX = m_aspectX;
+    const float aspectY = m_aspectY;
 
     // Either viewport size or mesh size changed, reinitialize the vertices.
     auto& vertices = m_warpMesh.Vertices();
@@ -174,69 +218,53 @@ void PerPixelMesh::InitializeMesh(const PresetState& presetState)
     }
 
     // Generate triangle lists for drawing the main warp mesh
-    int vertexListIndex{0};
-    for (int quadrant = 0; quadrant < 4; quadrant++)
-    {
-        for (int slice = 0; slice < m_gridSizeY / 2; slice++)
-        {
-            for (int gridX = 0; gridX < m_gridSizeX / 2; gridX++)
-            {
-                int xReference = gridX;
-                int yReference = slice;
+    WarpMeshTriangleIndices(m_gridSizeX, m_gridSizeY, m_warpMesh.Indices());
 
-                if ((quadrant & 1) != 0)
-                {
-                    xReference = m_gridSizeX - 1 - xReference;
-                }
-                if ((quadrant & 2) != 0)
-                {
-                    yReference = m_gridSizeY - 1 - yReference;
-                }
-
-                int const vertex = xReference + yReference * (m_gridSizeX + 1);
-
-                // 0 - 1      3
-                //   /      /
-                // 2      4 - 5
-                m_warpMesh.Indices()[vertexListIndex++] = vertex;
-                m_warpMesh.Indices()[vertexListIndex++] = vertex + 1;
-                m_warpMesh.Indices()[vertexListIndex++] = vertex + m_gridSizeX + 1;
-                m_warpMesh.Indices()[vertexListIndex++] = vertex + 1;
-                m_warpMesh.Indices()[vertexListIndex++] = vertex + m_gridSizeX + 1;
-                m_warpMesh.Indices()[vertexListIndex++] = vertex + m_gridSizeX + 2;
-            }
-        }
-    }
+#ifdef USE_GLES2
+    // Positions, rad/ang and indices only change here, so they're uploaded once instead of per frame.
+    m_warpMesh.Update();
+    m_radiusAngleBuffer.Update();
+#endif
 }
 
 void PerPixelMesh::CalculateMesh(const PresetState& presetState, const PerFrameContext& perFrameContext, PerPixelContext& perPixelContext)
 {
     // Cache some per-frame values as floats
-    float zoom = static_cast<float>(*perFrameContext.zoom);
-    float zoomExp = static_cast<float>(*perFrameContext.zoomexp);
-    float rot = static_cast<float>(*perFrameContext.rot);
-    float warp = static_cast<float>(*perFrameContext.warp);
-    float cx = static_cast<float>(*perFrameContext.cx);
-    float cy = static_cast<float>(*perFrameContext.cy);
-    float dx = static_cast<float>(*perFrameContext.dx);
-    float dy = static_cast<float>(*perFrameContext.dy);
-    float sx = static_cast<float>(*perFrameContext.sx);
-    float sy = static_cast<float>(*perFrameContext.sy);
+    WarpVertexParameters const frameValues{
+        static_cast<float>(*perFrameContext.zoom),
+        static_cast<float>(*perFrameContext.zoomexp),
+        static_cast<float>(*perFrameContext.rot),
+        static_cast<float>(*perFrameContext.warp),
+        static_cast<float>(*perFrameContext.cx),
+        static_cast<float>(*perFrameContext.cy),
+        static_cast<float>(*perFrameContext.dx),
+        static_cast<float>(*perFrameContext.dy),
+        static_cast<float>(*perFrameContext.sx),
+        static_cast<float>(*perFrameContext.sy)};
 
-    int vertex = 0;
+#ifdef USE_GLES2
+    // Per-frame parts of the u/v math, reused for every vertex that shares the frame values.
+    auto const warpFrame = GetWarpFrameParameters(presetState);
+    m_warpOffsets.Update(warpFrame, m_gridSizeX, m_gridSizeY);
+    float const frameCosRot = cosf(frameValues.rot);
+    float const frameSinRot = sinf(frameValues.rot);
+    float const frameLog2Zoom = log2f(frameValues.zoom);
+    float const frameLog2ZoomExp = log2f(frameValues.zoomExp);
+    Renderer::Point* const uvs = m_warpUVBuffer.Get().data();
+#endif
+
+    const Renderer::Point* const vertices = m_warpMesh.Vertices().Get().data();
+    const RadiusAngle* const radiusAngles = m_radiusAngleBuffer.Get().data();
 
     // Can't make this multithreaded as per-pixel code may use gmegabuf or regXX vars.
-    auto& vertices = m_warpMesh.Vertices();
-    for (int y = 0; y <= m_gridSizeY; y++)
+    int vertex = 0;
+    for (int gridY = 0; gridY <= m_gridSizeY; gridY++)
     {
-        for (int x = 0; x <= m_gridSizeX; x++)
+        for (int gridX = 0; gridX <= m_gridSizeX; gridX++, vertex++)
         {
-            auto& curVertex = vertices[vertex];
-            auto& curRadiusAngle = m_radiusAngleBuffer[vertex];
-            auto& curZoomRotWarp = m_zoomRotWarpBuffer[vertex];
-            auto& curCenter = m_centerBuffer[vertex];
-            auto& curDistance = m_distanceBuffer[vertex];
-            auto& curStretch = m_stretchBuffer[vertex];
+            auto const& curVertex = vertices[vertex];
+            auto const& curRadiusAngle = radiusAngles[vertex];
+            WarpVertexParameters values = frameValues;
 
             // Execute per-vertex/per-pixel code if the preset uses it.
             if (perPixelContext.perPixelCodeHandle)
@@ -258,56 +286,66 @@ void PerPixelMesh::CalculateMesh(const PresetState& presetState, const PerFrameC
 
                 perPixelContext.ExecutePerPixelCode();
 
-                curZoomRotWarp.zoom = static_cast<float>(*perPixelContext.zoom);
-                curZoomRotWarp.zoomExp = static_cast<float>(*perPixelContext.zoomexp);
-                curZoomRotWarp.rot = static_cast<float>(*perPixelContext.rot);
-                curZoomRotWarp.warp = static_cast<float>(*perPixelContext.warp);
-                curCenter = {static_cast<float>(*perPixelContext.cx),
-                             static_cast<float>(*perPixelContext.cy)};
-                curDistance = {static_cast<float>(*perPixelContext.dx),
-                               static_cast<float>(*perPixelContext.dy)};
-                curStretch = {static_cast<float>(*perPixelContext.sx),
-                              static_cast<float>(*perPixelContext.sy)};
-            }
-            else
-            {
-                curZoomRotWarp.zoom = zoom;
-                curZoomRotWarp.zoomExp = zoomExp;
-                curZoomRotWarp.rot = rot;
-                curZoomRotWarp.warp = warp;
-                curCenter = { cx, cy};
-                curDistance = {dx, dy};
-                curStretch = {sx, sy};
+                values = {static_cast<float>(*perPixelContext.zoom),
+                          static_cast<float>(*perPixelContext.zoomexp),
+                          static_cast<float>(*perPixelContext.rot),
+                          static_cast<float>(*perPixelContext.warp),
+                          static_cast<float>(*perPixelContext.cx),
+                          static_cast<float>(*perPixelContext.cy),
+                          static_cast<float>(*perPixelContext.dx),
+                          static_cast<float>(*perPixelContext.dy),
+                          static_cast<float>(*perPixelContext.sx),
+                          static_cast<float>(*perPixelContext.sy)};
             }
 
-            vertex++;
+#ifdef USE_GLES2
+            bool const ownRotation = values.rot != frameValues.rot;
+            float const zoom2 = WarpZoom(values.zoom, values.zoom != frameValues.zoom ? log2f(values.zoom) : frameLog2Zoom,
+                                         values.zoomExp, values.zoomExp != frameValues.zoomExp ? log2f(values.zoomExp) : frameLog2ZoomExp,
+                                         curRadiusAngle.radius);
+            float warpOffsetU{};
+            float warpOffsetV{};
+            m_warpOffsets.Offsets(gridX, gridY, warpOffsetU, warpOffsetV);
+            float u{};
+            float v{};
+            WarpTextureCoordinates(warpFrame, curVertex.X(), curVertex.Y(), zoom2, values, warpOffsetU, warpOffsetV,
+                                   ownRotation ? cosf(values.rot) : frameCosRot,
+                                   ownRotation ? sinf(values.rot) : frameSinRot,
+                                   u, v);
+            uvs[vertex] = {u, v};
+#else
+            m_zoomRotWarpBuffer[vertex] = {values.zoom, values.zoomExp, values.rot, values.warp};
+            m_centerBuffer[vertex] = {values.cx, values.cy};
+            m_distanceBuffer[vertex] = {values.dx, values.dy};
+            m_stretchBuffer[vertex] = {values.sx, values.sy};
+#endif
         }
     }
 
+#ifdef USE_GLES2
+    m_warpUVBuffer.Update();
+    m_warpUVsValid = true;
+#else
     m_warpMesh.Update();
     m_radiusAngleBuffer.Update();
     m_zoomRotWarpBuffer.Update();
     m_centerBuffer.Update();
     m_distanceBuffer.Update();
     m_stretchBuffer.Update();
+#endif
 }
 
 void PerPixelMesh::WarpedBlit(const PresetState& presetState,
                               const PerFrameContext& perFrameContext)
 {
     // Warp stuff
-    float const warpTime = presetState.renderContext.time * presetState.warpAnimSpeed;
-    float const warpScaleInverse = 1.0f / presetState.warpScale;
-    glm::vec4 const warpFactors{
-        11.68f + 4.0f * cosf(warpTime * 1.413f + 10),
-        8.77f + 3.0f * cosf(warpTime * 1.113f + 7),
-        10.54f + 3.0f * cosf(warpTime * 1.233f + 3),
-        11.49f + 4.0f * cosf(warpTime * 0.933f + 5),
-    };
+    auto const warpFrame = GetWarpFrameParameters(presetState);
+    float const warpTime = warpFrame.warpTime;
+    float const warpScaleInverse = warpFrame.warpScaleInverse;
+    glm::vec4 const warpFactors{warpFrame.warpFactors[0], warpFrame.warpFactors[1], warpFrame.warpFactors[2], warpFrame.warpFactors[3]};
 
     // Texel alignment
-    glm::vec2 const texelOffsets{presetState.renderContext.texelOffsetX / static_cast<float>(presetState.renderContext.viewportSizeX),
-                                 presetState.renderContext.texelOffsetY / static_cast<float>(presetState.renderContext.viewportSizeY)};
+    glm::vec2 const texelOffsets{warpFrame.texelOffsetX, warpFrame.texelOffsetY};
 
     // Decay
     float decay = std::min(static_cast<float>(*perFrameContext.decay), 1.0f);
@@ -368,6 +406,17 @@ void PerPixelMesh::WarpedBlit(const PresetState& presetState,
     Renderer::Sampler::Unbind(0);
     Renderer::Shader::Unbind();
 }
+
+#ifdef USE_GLES2
+auto PerPixelMesh::LastWarpUVs() const -> WarpUVGrid
+{
+    if (!m_warpUVsValid)
+    {
+        return {};
+    }
+    return {m_warpUVBuffer.Get().data(), m_gridSizeX, m_gridSizeY};
+}
+#endif
 
 auto PerPixelMesh::GetDefaultWarpShader(const PresetState& presetState) -> std::shared_ptr<Renderer::Shader>
 {

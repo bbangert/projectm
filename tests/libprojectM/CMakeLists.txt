@@ -34,6 +34,7 @@ add_executable(projectM-unittest
         MeshSizeTest.cpp
         MilkdropShaderCommentParsingTest.cpp
         PCMTest.cpp
+        PerPixelWarpTest.cpp
         PresetFileParserTest.cpp
         PresetShaderTranslatorTest.cpp
         UtilsTest.cpp
