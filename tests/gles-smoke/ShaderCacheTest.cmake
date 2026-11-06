@@ -5,10 +5,13 @@ cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
 #  2. every shader stage of PRESETS is then loaded from the cache (tool key == runtime key),
 #  3. an altered cached composite shader is what gets compiled and drawn,
 #  4. a preset whose composite shader and fallback composite shader both fail still loads and
-#     reports the compile error.
+#     reports the compile error,
+#  5. that preset then uses the classic composite, including the brighten/darken/solarize/invert
+#     filters.
 #
-# Inputs: PRETRANSLATE, SMOKE (executables), PRESETS (list), ALTERED_PRESET (one of PRESETS),
-# TEXTURE (an image for the random texture pool), WORK_DIR.
+# Inputs: PRETRANSLATE, SMOKE (executables), PRESETS (list), ALTERED_PRESET and CLASSIC_PRESET
+# (two of PRESETS; CLASSIC_PRESET renders white with its composite shader and with the classic
+# composite), TEXTURE (an image for the random texture pool), WORK_DIR.
 
 function(run_checked description)
     execute_process(COMMAND ${ARGN} RESULT_VARIABLE _result OUTPUT_VARIABLE _output ERROR_VARIABLE _error)
@@ -57,7 +60,14 @@ run_checked("Drawing the altered cached shader" ${_smoke} --shader-cache-dir "${
 
 # Broken preset and fallback composite shaders: the preset loads with the classic composite.
 file(COPY "${WORK_DIR}/cache/shaders/" DESTINATION "${WORK_DIR}/broken")
+cmake_path(GET CLASSIC_PRESET FILENAME _classic_name)
+find_key("${_tsv}" "${_classic_name}" comp _classic_comp_key)
 file(WRITE "${WORK_DIR}/broken/${_comp_key}.glsl" "not GLSL\n")
+file(WRITE "${WORK_DIR}/broken/${_classic_comp_key}.glsl" "not GLSL\n")
 file(WRITE "${WORK_DIR}/broken/${_default_key}.glsl" "not GLSL either\n")
 run_checked("Loading a preset whose fallback composite fails" ${_smoke} --shader-cache-dir "${WORK_DIR}/broken"
         --expect-load-status compile_error:comp "${ALTERED_PRESET}")
+
+# The classic composite inverts the black image to white.
+run_checked("Applying the classic filters after both composite shaders fail" ${_smoke} --shader-cache-dir "${WORK_DIR}/broken"
+        --expect-load-status compile_error:comp --expect-color ffffff "${CLASSIC_PRESET}")

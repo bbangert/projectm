@@ -62,15 +62,20 @@ void FinalComposite::LoadCompositeShader(const PresetState& presetState)
     }
     else
     {
-        // Video echo OR gamma adjustment with random hue.
-        m_videoEcho = std::make_unique<VideoEcho>(presetState);
-        if (presetState.brighten ||
-            presetState.darken ||
-            presetState.solarize ||
-            presetState.invert)
-        {
-            m_filters = std::make_unique<Filters>(presetState);
-        }
+        CreateClassicEffects(presetState);
+    }
+}
+
+void FinalComposite::CreateClassicEffects(const PresetState& presetState)
+{
+    // Video echo OR gamma adjustment with random hue.
+    m_videoEcho = std::make_unique<VideoEcho>(presetState);
+    if (presetState.brighten ||
+        presetState.darken ||
+        presetState.solarize ||
+        presetState.invert)
+    {
+        m_filters = std::make_unique<Filters>(presetState);
     }
 }
 
@@ -98,10 +103,10 @@ void FinalComposite::CompileCompositeShader(PresetState& presetState)
             catch (Renderer::ShaderException& fallbackEx)
             {
                 // Composite the classic way, like presets without a composite shader.
-                LOG_ERROR("[FinalComposite] Error compiling fallback composite shader: " + fallbackEx.message() + " - Using video echo.");
+                LOG_ERROR("[FinalComposite] Error compiling fallback composite shader: " + fallbackEx.message() + " - Using the classic composite.");
                 m_compositeShaderResult.RecordFailure(fallbackEx);
                 m_compositeShader.reset();
-                m_videoEcho = std::make_unique<VideoEcho>(presetState);
+                CreateClassicEffects(presetState);
             }
         }
     }

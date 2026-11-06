@@ -81,6 +81,12 @@ private:
      */
     void InitializeMesh(const PresetState& presetState);
 
+    /**
+     * @brief Creates the classic video echo and filter effects used without a composite shader.
+     * @param presetState The preset state to retrieve the configuration values from.
+     */
+    void CreateClassicEffects(const PresetState& presetState);
+
     static float SquishToCenter(float x, float exponent);
 
     static void UvToMathSpace(float aspectX, float aspectY,
