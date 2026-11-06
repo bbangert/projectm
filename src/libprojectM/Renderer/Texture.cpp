@@ -4,6 +4,7 @@
 #include <Logging.hpp>
 #endif
 
+#include <atomic>
 #include <utility>
 
 namespace libprojectM {
@@ -24,11 +25,10 @@ auto TargetSupported(GLenum target) -> bool
         return true;
     }
 
-    static bool loggedUnsupported = false;
-    if (!loggedUnsupported)
+    static std::atomic<bool> loggedUnsupported{false};
+    if (!loggedUnsupported.exchange(true))
     {
         LOG_WARN("[Texture] 3D textures are not supported on OpenGL ES 2.0; the noise volumes are left empty.");
-        loggedUnsupported = true;
     }
     return false;
 }
