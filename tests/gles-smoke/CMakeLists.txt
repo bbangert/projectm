@@ -39,6 +39,41 @@ if(USE_GLES2)
     target_compile_definitions(projectM-gles-smoke PRIVATE PROJECTM_SMOKE_GLES2)
 endif()
 
+# Full-screen KMS preset player for manual checks on real display hardware.
+find_path(DRM_INCLUDE_DIR xf86drm.h)
+find_path(DRM_UAPI_INCLUDE_DIR drm.h PATH_SUFFIXES libdrm)
+find_library(DRM_LIBRARY drm)
+
+if(GBM_INCLUDE_DIR AND GBM_LIBRARY AND DRM_INCLUDE_DIR AND DRM_UAPI_INCLUDE_DIR AND DRM_LIBRARY)
+    add_executable(projectM-kms-demo
+            KmsPresetDemo.cpp
+            )
+
+    target_include_directories(projectM-kms-demo
+            PRIVATE
+            "${EGL_INCLUDE_DIR}"
+            "${GLES2_INCLUDE_DIR}"
+            "${GBM_INCLUDE_DIR}"
+            "${DRM_INCLUDE_DIR}"
+            "${DRM_UAPI_INCLUDE_DIR}"
+            )
+
+    target_link_libraries(projectM-kms-demo
+            PRIVATE
+            libprojectM::projectM
+            "${EGL_LIBRARY}"
+            "${GLES2_LIBRARY}"
+            "${GBM_LIBRARY}"
+            "${DRM_LIBRARY}"
+            )
+
+    if(USE_GLES2)
+        target_compile_definitions(projectM-kms-demo PRIVATE PROJECTM_SMOKE_GLES2)
+    endif()
+else()
+    message(STATUS "libdrm or GBM not found, not building projectM-kms-demo")
+endif()
+
 if(BUILD_TESTING)
     # Mesa's surfaceless platform (llvmpipe without a GPU). Presets without warp/comp shaders only.
     set(_smoke_presets
