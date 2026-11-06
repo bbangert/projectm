@@ -303,6 +303,16 @@ void PerPixelMesh::WarpedBlit(const PresetState& presetState,
     // No blending between presets here, so we make sure blending is disabled.
     Renderer::BlendMode::SetBlendActive(false);
 
+    // Set the main texture's wrap mode.
+    if (*perFrameContext.wrap > 0.0001f)
+    {
+        m_perPixelSampler.WrapMode(GL_REPEAT);
+    }
+    else
+    {
+        m_perPixelSampler.WrapMode(GL_CLAMP_TO_EDGE);
+    }
+
     if (!m_warpShader)
     {
         auto perPixelMeshShader = GetDefaultWarpShader(presetState);
@@ -321,7 +331,7 @@ void PerPixelMesh::WarpedBlit(const PresetState& presetState,
     }
     else
     {
-        m_warpShader->LoadVariables(presetState, perFrameContext);
+        m_warpShader->LoadVariables(presetState, perFrameContext, &m_perPixelSampler);
         auto& shader = m_warpShader->Shader();
         shader.SetUniformFloat4("aspect", {presetState.renderContext.aspectX,
                                            presetState.renderContext.aspectY,
@@ -337,15 +347,7 @@ void PerPixelMesh::WarpedBlit(const PresetState& presetState,
     assert(!presetState.mainTexture.expired());
     presetState.mainTexture.lock()->Bind(0);
 
-    // Set wrap mode and bind the sampler to get interpolation right.
-    if (*perFrameContext.wrap > 0.0001f)
-    {
-        m_perPixelSampler.WrapMode(GL_REPEAT);
-    }
-    else
-    {
-        m_perPixelSampler.WrapMode(GL_CLAMP_TO_EDGE);
-    }
+    // Bind the sampler to get interpolation right.
     m_perPixelSampler.Bind(0);
 
     m_warpMesh.Draw();

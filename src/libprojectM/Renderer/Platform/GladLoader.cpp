@@ -6,6 +6,7 @@
 #include "GLResolver.hpp"
 #include "Logging.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <string>
 
@@ -36,9 +37,10 @@ auto GladLoader::Instance() -> GladLoader&
     return instance;
 }
 
-auto GladLoader::CheckGLRequirements() -> bool
+auto GladLoader::CheckGLRequirements(GLInfo& info) -> bool
 {
 #ifdef __EMSCRIPTEN__
+    static_cast<void>(info);
     return true;
 #else
 
@@ -87,6 +89,7 @@ auto GladLoader::CheckGLRequirements() -> bool
         LOG_ERROR(std::string("[GladLoader] GL requirements check failed: ") + glDetails.reason);
     }
 
+    info = std::move(glDetails.info);
     return glDetails.success;
 
 #endif // #ifndef __EMSCRIPTEN__
@@ -106,7 +109,8 @@ auto GladLoader::Initialize() -> bool
     }
 
     // Always validate context requirements for the calling thread
-    if (!CheckGLRequirements())
+    GLInfo glInfo;
+    if (!CheckGLRequirements(glInfo))
     {
         return false;
     }
@@ -117,7 +121,13 @@ auto GladLoader::Initialize() -> bool
         const std::unique_lock<std::mutex> lock(m_mutex);
         if (m_isLoaded)
         {
+#ifdef USE_GLES2
+            // GLAD's pointers and m_hasSamplerObjects are process-wide, but extensions are per
+            // context: check this context against what the first one enabled.
+            return VerifyGLES2EntryPoints(glInfo);
+#else
             return true;
+#endif
         }
 
 #ifndef USE_GLES
@@ -147,7 +157,7 @@ auto GladLoader::Initialize() -> bool
                 LOG_INFO("[GladLoader] GLAD    GLES2 API was loaded successfully");
             }
 #ifdef USE_GLES2
-            if (!VerifyGLES2EntryPoints())
+            if (!VerifyGLES2EntryPoints(glInfo))
             {
                 return false;
             }
@@ -198,17 +208,22 @@ auto DrainGLErrors() -> GLenum
 
 } // namespace
 
-auto GladLoader::VerifyGLES2EntryPoints() -> bool
+auto GladLoader::VerifyGLES2EntryPoints(const GLInfo& info) -> bool
 {
     // GLAD (generated with --alias) maps the OES/MESA extension functions onto the ES 3.0 core names,
     // so the core names are what the renderer calls. A pointer is only loaded if the extension string
-    // (or ES 3.0) is present; a create/bind/delete round trip checks that the functions actually work.
-    const char* const coreOrExt = GLAD_GL_ES_VERSION_3_0 ? "OpenGL ES 3.0" : nullptr;
+    // (or ES 3.0) is present in the context GLAD was loaded with, and GLAD's GLAD_GL_* flags describe
+    // that context too, so the calling context's own version and extensions are checked here. A
+    // create/bind/delete round trip checks that the functions actually work.
+    const auto hasExtension = [&info](const char* name) {
+        return std::find(info.extensions.begin(), info.extensions.end(), name) != info.extensions.end();
+    };
+    const char* const coreOrExt = info.major >= 3 ? "OpenGL ES 3.0" : nullptr;
 
     DrainGLErrors();
 
     // Vertex array objects: required, used for every mesh.
-    const char* vaoSource = coreOrExt ? coreOrExt : (GLAD_GL_OES_vertex_array_object ? "GL_OES_vertex_array_object" : nullptr);
+    const char* vaoSource = coreOrExt ? coreOrExt : (hasExtension("GL_OES_vertex_array_object") ? "GL_OES_vertex_array_object" : nullptr);
     bool vaoUsable = vaoSource != nullptr &&
                      glad_glGenVertexArrays != nullptr &&
                      glad_glBindVertexArray != nullptr &&
@@ -235,7 +250,7 @@ auto GladLoader::VerifyGLES2EntryPoints() -> bool
     // PROJECTM_GLES2_NO_SAMPLER_OBJECTS=1 forces that fallback, for testing it on drivers that have them.
     const char* noSamplerObjects = std::getenv("PROJECTM_GLES2_NO_SAMPLER_OBJECTS");
     const bool samplersDisabled = noSamplerObjects != nullptr && std::string(noSamplerObjects) == "1";
-    const char* samplerSource = coreOrExt ? coreOrExt : (GLAD_GL_MESA_sampler_objects ? "GL_MESA_sampler_objects" : nullptr);
+    const char* samplerSource = coreOrExt ? coreOrExt : (hasExtension("GL_MESA_sampler_objects") ? "GL_MESA_sampler_objects" : nullptr);
     bool samplersUsable = !samplersDisabled &&
                           samplerSource != nullptr &&
                           glad_glGenSamplers != nullptr &&
@@ -252,6 +267,20 @@ auto GladLoader::VerifyGLES2EntryPoints() -> bool
         glDeleteSamplers(1, &sampler);
         samplersUsable = sampler != 0 && DrainGLErrors() == GL_NO_ERROR;
     }
+
+    if (m_isLoaded)
+    {
+        // A later context. The per-texture fallback works on any context, sampler objects don't.
+        if (m_hasSamplerObjects && !samplersUsable)
+        {
+            LOG_ERROR("[GladLoader] This OpenGL ES context has no usable sampler objects, but the first projectM context "
+                      "enabled them. The GL entry points and the sampler mode are process-wide, so every context "
+                      "must provide what the first one did.");
+            return false;
+        }
+        return true;
+    }
+
     m_hasSamplerObjects = samplersUsable;
 
     LOG_INFO(std::string("[GladLoader] GLES2   vertex arrays via ") + vaoSource +

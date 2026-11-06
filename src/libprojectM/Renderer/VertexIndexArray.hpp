@@ -23,6 +23,11 @@ public:
      * Indices are kept as uint32_t on the CPU and narrowed on upload.
      */
     static constexpr GLenum GLIndexType = GL_UNSIGNED_SHORT;
+
+    /**
+     * The number of vertices 16-bit indices can address.
+     */
+    static constexpr size_t MaxVertexCount = 65536;
 #else
     static constexpr GLenum GLIndexType = GL_UNSIGNED_INT; //!< The GL index type of the uploaded buffer.
 #endif

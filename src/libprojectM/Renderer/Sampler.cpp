@@ -12,8 +12,9 @@ namespace {
 
 /**
  * GLES 2 only has sampler objects through GL_MESA_sampler_objects. Without it, the sampler state
- * is applied to the texture bound to the unit instead. That is exact unless one texture is bound
- * to two units with different wrap/filter modes in the same draw; then the last bound state wins.
+ * is applied to the texture bound to the unit instead, so a texture bound to two units with
+ * different wrap/filter modes in one draw gets the last bound state on both. Preset shaders avoid
+ * that with TextureStateCopies.
  */
 auto UseSamplerObjects() -> bool
 {
