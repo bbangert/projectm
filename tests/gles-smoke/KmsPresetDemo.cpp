@@ -727,10 +727,19 @@ int main(int argc, char** argv)
             exitCode = 6;
             break;
         }
+        const double flipWaitStart = MonotonicMs();
         while (g_flipPending)
         {
+            // A signal (SIGINT/SIGTERM) interrupts poll; keep waiting so the queued flip completes
+            // and the outer loop can observe g_stop.
+            const double remainingMs = 1000.0 - (MonotonicMs() - flipWaitStart);
             pollfd poll_fd{kms.fd, POLLIN, 0};
-            if (poll(&poll_fd, 1, 1000) <= 0)
+            const int pollResult = remainingMs > 0.0 ? poll(&poll_fd, 1, static_cast<int>(std::ceil(remainingMs))) : 0;
+            if (pollResult < 0 && errno == EINTR)
+            {
+                continue;
+            }
+            if (pollResult <= 0)
             {
                 Log("ERROR page flip timeout");
                 exitCode = 7;
