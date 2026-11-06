@@ -105,7 +105,11 @@ void MilkdropPreset::RenderFrame(const libprojectM::Audio::FrameAudioData& audio
     // Only do it after drawing one frame after init or resize.
     if (!m_isFirstFrame)
     {
+#ifdef USE_GLES2
+        m_motionVectors.Draw(m_perFrameContext, m_perPixelMesh.LastWarpUVs());
+#else
         m_motionVectors.Draw(m_perFrameContext, m_motionVectorUVMap ? m_motionVectorUVMap->Texture() : nullptr);
+#endif
     }
 
     // y-flip the previous frame and assign the flipped texture as "main"

@@ -96,6 +96,16 @@ if(BUILD_TESTING)
     set_tests_properties(projectM-gles-smoke PROPERTIES ENVIRONMENT "${_smoke_environment}")
 
     if(USE_GLES2)
+        # A preset that fails to load leaves the idle preset rendering. Its mesh upload must not be
+        # counted against the valid preset that follows.
+        add_test(NAME projectM-gles2-failed-then-valid-preset
+                COMMAND projectM-gles-smoke --frames 10
+                --expect-failure missing-preset.milk
+                "${CMAKE_CURRENT_BINARY_DIR}/missing-preset.milk"
+                "${PROJECTM_SOURCE_DIR}/presets/tests/100-square.milk"
+                )
+        set_tests_properties(projectM-gles2-failed-then-valid-preset PROPERTIES ENVIRONMENT "${_smoke_environment}")
+
         # The per-texture sampler state fallback must render like sampler objects, also for a
         # texture sampled with several wrap/filter modes in one draw.
         add_test(NAME projectM-gles2-sampler-fallback
