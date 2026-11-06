@@ -75,10 +75,11 @@ else()
 endif()
 
 if(BUILD_TESTING)
-    # Mesa's surfaceless platform (llvmpipe without a GPU). Presets without warp/comp shaders only.
+    # Mesa's surfaceless platform (llvmpipe without a GPU).
     set(_smoke_presets
             "${PROJECTM_SOURCE_DIR}/presets/tests/110-per_pixel.milk"
             "${PROJECTM_SOURCE_DIR}/presets/tests/200-wave.milk"
+            "${PROJECTM_SOURCE_DIR}/presets/tests/270-warpcomp-shaders.milk"
             "${PROJECTM_SOURCE_DIR}/presets/tests/250-wavecode.milk"
             "${PROJECTM_SOURCE_DIR}/presets/tests/100-square.milk"
             )
