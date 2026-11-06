@@ -13,7 +13,7 @@
  *                       [--dump <prefix>] [--expect-failure <preset>] [--shader-cache-dir <dir>]
  *                       [--require-cached] [--expect-color <rrggbb>] [--expect-load-status <status>]
  *                       [--preset-list <file>] [--preload] [--hard-cut] [--start-clean]
- *                       <preset.milk>...
+ *                       [--callback-load <preset.milk>] <preset.milk>...
  *
  * --require-cached fails a preset unless all its shader stages came from the shader cache,
  * --expect-color checks that the last frame is that color, --expect-load-status checks the
@@ -26,7 +26,8 @@
  * as preload_ms and activate_ms (load_ms is their sum). A failed preload or activation fails the
  * preset unless it is expected to fail, and the preload must leave the application's framebuffer
  * bindings, viewport, scissor state and clear color as they were. --hard-cut switches without
- * blending, --start-clean enables projectm_set_preset_start_clean().
+ * blending, --start-clean enables projectm_set_preset_start_clean(). With --callback-load, the
+ * load result callback of each preset's load loads the given preset with a hard cut.
  *
  * On the ES 2 backend, PROJECTM_GLES2_NO_SAMPLER_OBJECTS=1 exercises the per-texture sampler state
  * fallback.
@@ -105,6 +106,7 @@ struct Options
     bool preload{false};
     bool hardCut{false};
     bool startClean{false};
+    std::string callbackLoad;
     std::vector<std::string> presets;
 };
 
@@ -142,6 +144,9 @@ struct PresetResult
 std::vector<std::string> g_switchFailures;
 std::string g_lastSwitchFailureMessage;
 LoadResult g_lastLoadResult;
+projectm_handle g_projectM{};
+std::string g_callbackLoad;
+bool g_inCallbackLoad{false};
 
 auto StatusName(projectm_preset_load_status status) -> const char*
 {
@@ -183,6 +188,13 @@ void LoadResultCallback(const projectm_preset_load_result* result, void*)
     g_lastLoadResult.message = result->message ? result->message : "";
     g_lastLoadResult.shaderStages = result->shader_stages;
     g_lastLoadResult.cachedStages = result->cached_stages;
+
+    if (!g_callbackLoad.empty() && !g_inCallbackLoad)
+    {
+        g_inCallbackLoad = true;
+        projectm_load_preset_file(g_projectM, g_callbackLoad.c_str(), false);
+        g_inCallbackLoad = false;
+    }
 }
 
 auto ReadPresetList(const std::string& path, std::vector<std::string>& presets) -> bool
@@ -361,6 +373,10 @@ auto ParseOptions(int argc, char** argv, Options& options) -> bool
         {
             options.startClean = true;
         }
+        else if (arg == "--callback-load")
+        {
+            options.callbackLoad = next();
+        }
         else if (arg == "--preset-list")
         {
             const char* listFile = next();
@@ -411,7 +427,7 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "usage: %s [--gbm <device>] [--size WxH] [--frames N] [--texture-path DIR] "
                              "[--dump PREFIX] [--expect-failure PRESET] [--shader-cache-dir DIR] [--require-cached] "
                              "[--expect-color RRGGBB] [--expect-load-status STATUS[:STAGE]] [--preset-list FILE] [--preload] [--hard-cut] "
-                             "[--start-clean] preset.milk...\n",
+                             "[--start-clean] [--callback-load PRESET] preset.milk...\n",
                      argv[0]);
         return 2;
     }
@@ -564,6 +580,8 @@ int main(int argc, char** argv)
     projectm_set_soft_cut_duration(projectM, 0.5);
     projectm_set_preset_switch_failed_event_callback(projectM, &SwitchFailedCallback, nullptr);
     projectm_set_preset_load_result_event_callback(projectM, &LoadResultCallback, nullptr);
+    g_projectM = projectM;
+    g_callbackLoad = options.callbackLoad;
     if (!options.shaderCacheDir.empty())
     {
         projectm_set_shader_cache_dir(projectM, options.shaderCacheDir.c_str());

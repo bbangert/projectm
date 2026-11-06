@@ -154,22 +154,28 @@ void ProjectM::LoadPresetFile(const std::string& presetFilename, bool smoothTran
 {
     PresetLoadResult result;
     auto preset = CreatePreset(presetFilename, nullptr, result);
-    ReportPresetLoad(presetFilename, result, preset != nullptr);
-    if (preset)
+    const bool loaded = preset != nullptr;
+    if (loaded)
     {
         StartPresetTransition(std::move(preset), !smoothTransition);
     }
+
+    // After the transition started, so a preset the callbacks load replaces this one.
+    ReportPresetLoad(presetFilename, result, loaded);
 }
 
 void ProjectM::LoadPresetData(std::istream& presetData, bool smoothTransition)
 {
     PresetLoadResult result;
     auto preset = CreatePreset("", &presetData, result);
-    ReportPresetLoad("", result, preset != nullptr);
-    if (preset)
+    const bool loaded = preset != nullptr;
+    if (loaded)
     {
         StartPresetTransition(std::move(preset), !smoothTransition);
     }
+
+    // After the transition started, so a preset the callbacks load replaces this one.
+    ReportPresetLoad("", result, loaded);
 }
 
 auto ProjectM::PreloadPresetFile(const std::string& presetFilename) -> PresetLoadResult

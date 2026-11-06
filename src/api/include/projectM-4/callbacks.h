@@ -85,6 +85,10 @@ typedef struct projectm_preset_load_result {
  * If the preset could not be loaded at all, this callback is called before the preset switch
  * failed callback.
  *
+ * The load functions call it after the switch to the loaded preset started, the preload functions
+ * after the warm-up frame. The callback may load, preload, activate or discard presets: a preset it
+ * loads or activates replaces the one just loaded.
+ *
  * @param result The load result. Only valid inside the callback.
  * @param user_data A user-defined data pointer that was provided when registering the callback,
  *                  e.g. context information.

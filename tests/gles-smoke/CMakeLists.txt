@@ -109,6 +109,14 @@ if(BUILD_TESTING)
             )
     set_tests_properties(projectM-gles-smoke-preload-first-frame PROPERTIES ENVIRONMENT "${_smoke_environment}")
 
+    # A preset loaded from the load result callback replaces the one being loaded (white).
+    add_test(NAME projectM-gles-smoke-callback-load
+            COMMAND projectM-gles-smoke --frames 3 --expect-color ffffff
+            --callback-load ${PROJECTM_SOURCE_DIR}/presets/tests/272-classic-filters.milk
+            ${PROJECTM_SOURCE_DIR}/presets/tests/273-blur-history.milk
+            )
+    set_tests_properties(projectM-gles-smoke-callback-load PROPERTIES ENVIRONMENT "${_smoke_environment}")
+
     if(USE_GLES2)
         # The per-texture sampler state fallback must render like sampler objects, also for a
         # texture sampled with several wrap/filter modes in one draw.
