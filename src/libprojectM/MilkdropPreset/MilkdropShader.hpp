@@ -11,6 +11,9 @@
 
 #include <Renderer/Shader.hpp>
 #include <Renderer/TextureManager.hpp>
+#ifdef USE_GLES2
+#include <Renderer/TextureStateCopies.hpp>
+#endif
 
 #include <array>
 #include <set>
@@ -58,8 +61,11 @@ public:
      * Binds the underlying shader program.
      * @param presetState The preset state to pull the values from.
      * @param perFrameContext The per-frame context with dynamically calculated values.
+     * @param mainSamplerOverride The sampler the caller binds to texture unit 0 (the first main
+     *                            texture reference) after this call, if any.
      */
-    void LoadVariables(const PresetState& presetState, const PerFrameContext& perFrameContext);
+    void LoadVariables(const PresetState& presetState, const PerFrameContext& perFrameContext,
+                       const Renderer::Sampler* mainSamplerOverride = nullptr);
 
     /**
      * @brief Returns the contained shader.
@@ -94,6 +100,18 @@ private:
      */
     void UpdateMaxBlurLevel(BlurTexture::BlurLevel requestedLevel);
 
+#ifdef USE_GLES2
+    /**
+     * @brief Binds all texture descriptors when sampler objects are unavailable.
+     *
+     * Textures referenced with several wrap/filter modes get a texture copy per extra mode.
+     *
+     * @param presetState The preset state to pull the blur textures and shader cache from.
+     * @param mainSamplerOverride The sampler the caller binds to texture unit 0 afterwards, if any.
+     */
+    void BindTexturesWithoutSamplerObjects(const PresetState& presetState, const Renderer::Sampler* mainSamplerOverride);
+#endif
+
     ShaderType m_type{ShaderType::WarpShader}; //!< Type of this shader.
     std::string m_fragmentShaderCode;          //!< The original preset fragment shader code.
     std::string m_preprocessedCode;            //!< The preprocessed preset shader code.
@@ -102,6 +120,9 @@ private:
     std::vector<Renderer::TextureSamplerDescriptor> m_mainTextureDescriptors;              //!< Descriptors for all main texture references.
     std::vector<Renderer::TextureSamplerDescriptor> m_textureSamplerDescriptors;           //!< Descriptors of all referenced samplers in the shader code.
     BlurTexture::BlurLevel m_maxBlurLevelRequired{BlurTexture::BlurLevel::None}; //!< Max blur level of main texture required by this shader.
+#ifdef USE_GLES2
+    Renderer::TextureStateCopies m_textureStateCopies; //!< Per-mode texture copies when sampler objects are unavailable.
+#endif
 
     std::array<float, 4> m_randValues{};               //!< Random values which don't change every frame.
     std::array<glm::vec3, 20> m_randTranslation{};     //!< Random translation vectors which don't change every frame.

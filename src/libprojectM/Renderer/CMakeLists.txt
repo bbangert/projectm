@@ -96,6 +96,14 @@ add_library(Renderer OBJECT
         Platform/PlatformLibraryNames.hpp
 )
 
+if(USE_GLES2)
+    target_sources(Renderer
+            PRIVATE
+            TextureStateCopies.cpp
+            TextureStateCopies.hpp
+            )
+endif()
+
 target_include_directories(Renderer
         PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/.."
