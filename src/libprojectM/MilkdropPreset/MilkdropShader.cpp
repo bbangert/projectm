@@ -5,6 +5,8 @@
 
 #include <MilkdropStaticShaders.hpp>
 
+#include <Logging.hpp>
+
 #ifdef USE_GLES2
 #include <Renderer/Platform/GladLoader.hpp>
 #endif
@@ -361,6 +363,11 @@ auto MilkdropShader::Shader() -> Renderer::Shader&
     return m_shader;
 }
 
+auto MilkdropShader::LoadedFromCache() const -> bool
+{
+    return m_loadedFromCache;
+}
+
 auto MilkdropShader::Stage() const -> PresetShaderTranslator::Stage
 {
     return m_type == ShaderType::WarpShader ? PresetShaderTranslator::Stage::Warp : PresetShaderTranslator::Stage::Composite;
@@ -391,7 +398,19 @@ void MilkdropShader::TranspileHLSLShader(const PresetState& presetState, const s
         declarations.texSizes.insert(desc.TexSizeDeclaration());
     }
 
-    auto const glsl = PresetShaderTranslator::TranslateToGlsl(Stage(), PresetShaderTranslator::RuntimeTarget(), program, declarations);
+    auto const target = PresetShaderTranslator::RuntimeTarget();
+    std::string glsl;
+    const auto* cacheDirectory = presetState.renderContext.presetShaderCacheDirectory;
+    if (cacheDirectory != nullptr && !cacheDirectory->empty())
+    {
+        auto const key = PresetShaderTranslator::CacheKey(Stage(), target, program, declarations);
+        m_loadedFromCache = PresetShaderTranslator::ReadCachedShader(*cacheDirectory, key, glsl);
+        LOG_DEBUG(std::string("[MilkdropShader] Pre-translated ") + PresetShaderTranslator::StageName(Stage()) + " shader " + key + (m_loadedFromCache ? " found." : " not found."));
+    }
+    if (!m_loadedFromCache)
+    {
+        glsl = PresetShaderTranslator::TranslateToGlsl(Stage(), target, program, declarations);
+    }
 
     // Now we have GLSL source for the preset shader program (hopefully it's valid!)
     // Compile the preset shader fragment shader with the standard vertex shader and cross our fingers.

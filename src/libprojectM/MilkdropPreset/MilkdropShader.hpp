@@ -74,6 +74,12 @@ public:
      */
     auto Shader() -> Renderer::Shader&;
 
+    /**
+     * @brief Returns whether the GLSL code was read from the pre-translated shader cache.
+     * @return True if LoadTexturesAndCompile() used a cached GLSL file instead of translating.
+     */
+    auto LoadedFromCache() const -> bool;
+
 private:
     /**
      * @brief Returns the translator stage of this shader.
@@ -114,6 +120,7 @@ private:
     ShaderType m_type{ShaderType::WarpShader}; //!< Type of this shader.
     std::string m_fragmentShaderCode;          //!< The original preset fragment shader code.
     std::string m_preprocessedCode;            //!< The preprocessed preset shader code.
+    bool m_loadedFromCache{false};             //!< True if the GLSL code came from the shader cache.
 
     PresetShaderTranslator::SamplerReferences m_samplers;                      //!< All sampler names referenced in the shader code and the blur level.
     std::vector<Renderer::TextureSamplerDescriptor> m_mainTextureDescriptors;    //!< Descriptors for all main texture references.

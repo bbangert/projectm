@@ -115,6 +115,12 @@ public:
     void ResetTextures();
 
     /**
+     * @brief Sets the directory with pre-translated preset shaders.
+     * @param directory The directory, or an empty string to always translate.
+     */
+    void SetPresetShaderCacheDirectory(std::string directory);
+
+    /**
      * @brief Sets a callback function for loading textures from non-filesystem sources.
      * @param callback The callback function, or nullptr to disable.
      */
@@ -338,6 +344,7 @@ private:
     float m_texelOffsetY{0.0};       //!< Vertical warp shader texel offset
 
     std::vector<std::string> m_textureSearchPaths;     ///!< List of paths to search for texture files
+    std::string m_presetShaderCacheDirectory;          //!< Directory with pre-translated preset shaders, empty if unused.
     Renderer::TextureLoadCallback m_textureLoadCallback; //!< Optional callback for loading textures from non-filesystem sources.
 
     /** Timing information */

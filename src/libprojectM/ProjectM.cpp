@@ -37,6 +37,8 @@
 
 #include <UserSprites/SpriteManager.hpp>
 
+#include <utility>
+
 namespace libprojectM {
 
 ProjectM::ProjectM()
@@ -103,6 +105,11 @@ void ProjectM::ResetTextures()
     {
         m_textureManager->SetTextureLoadCallback(m_textureLoadCallback);
     }
+}
+
+void ProjectM::SetPresetShaderCacheDirectory(std::string directory)
+{
+    m_presetShaderCacheDirectory = std::move(directory);
 }
 
 void ProjectM::SetTextureLoadCallback(Renderer::TextureLoadCallback callback)
@@ -641,6 +648,7 @@ auto ProjectM::GetRenderContext() -> Renderer::RenderContext
 
     ctx.textureManager = m_textureManager.get();
     ctx.shaderCache = m_shaderCache.get();
+    ctx.presetShaderCacheDirectory = &m_presetShaderCacheDirectory;
 
     if (m_transition)
     {

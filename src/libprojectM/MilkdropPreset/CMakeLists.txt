@@ -51,10 +51,41 @@ add_custom_command(OUTPUT
         GenerateStaticShaders.cmake
         )
 
+# Everything that changes the translated GLSL for a given preset shader. Its hash is part of the
+# preset shader cache key, so pre-translated shaders from another translator version are ignored.
+file(GLOB _hlslparser_sources CONFIGURE_DEPENDS
+        "${PROJECTM_SOURCE_DIR}/vendor/hlslparser/src/*.cpp"
+        "${PROJECTM_SOURCE_DIR}/vendor/hlslparser/src/*.h"
+        )
+set(TRANSLATOR_VERSION_SOURCES
+        ${_hlslparser_sources}
+        ${CMAKE_CURRENT_SOURCE_DIR}/PresetShaderTranslator.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/PresetShaderTranslator.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Shaders/PresetShaderHeaderGlsl330.inc
+        ${CMAKE_CURRENT_SOURCE_DIR}/../Utils.cpp
+        )
+string(REPLACE ";" "\\;" TRANSLATOR_VERSION_SOURCES_ARG "${TRANSLATOR_VERSION_SOURCES}")
+add_custom_command(OUTPUT
+        ${CMAKE_CURRENT_BINARY_DIR}/PresetShaderTranslatorVersion.hpp
+
+        COMMAND ${CMAKE_COMMAND}
+
+        ARGS
+        -D SOURCE_DIR="${PROJECTM_SOURCE_DIR}"
+        -D SOURCES="${TRANSLATOR_VERSION_SOURCES_ARG}"
+        -D OUTPUT_FILE=${CMAKE_CURRENT_BINARY_DIR}/PresetShaderTranslatorVersion.hpp
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/GeneratePresetShaderTranslatorVersion.cmake
+
+        DEPENDS # Files watched for changes:
+        ${TRANSLATOR_VERSION_SOURCES}
+        GeneratePresetShaderTranslatorVersion.cmake
+        )
+
 add_library(MilkdropPreset OBJECT
         ${SHADER_FILES}
         ${CMAKE_CURRENT_BINARY_DIR}/MilkdropStaticShaders.cpp
         ${CMAKE_CURRENT_BINARY_DIR}/MilkdropStaticShaders.hpp
+        ${CMAKE_CURRENT_BINARY_DIR}/PresetShaderTranslatorVersion.hpp
         BlurTexture.cpp
         BlurTexture.hpp
         Border.cpp

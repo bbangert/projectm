@@ -12,8 +12,8 @@ class PresetFileParser;
 /**
  * @brief GL-free translation of preset warp/composite shaders from HLSL to GLSL.
  *
- * MilkdropShader uses these functions at runtime. Offline tools use the same functions, so their
- * GLSL output matches the runtime's exactly.
+ * MilkdropShader uses these functions at runtime. The offline pre-translation tool uses the same
+ * functions, so its shader cache keys and GLSL output match the runtime's exactly.
  */
 namespace PresetShaderTranslator {
 
@@ -168,6 +168,34 @@ auto PreprocessPresetShader(Stage stage, Target target, const std::string& code)
  */
 auto TranslateToGlsl(Stage stage, Target target, const std::string& preprocessedCode,
                      const Declarations& declarations) -> std::string;
+
+/**
+ * @brief Returns a hash of the translator sources, changing with every translator change.
+ */
+auto TranslatorVersion() -> const char*;
+
+/**
+ * @brief Returns the shader cache key of a preset shader.
+ *
+ * The key is the SHA-256 (hex) of the translator version, target, stage, declarations and the
+ * preprocessed code. Any change to these yields a different key.
+ */
+auto CacheKey(Stage stage, Target target, const std::string& preprocessedCode,
+              const Declarations& declarations) -> std::string;
+
+/**
+ * @brief Returns the cache file name for a key: "<key>.glsl".
+ */
+auto CacheFileName(const std::string& key) -> std::string;
+
+/**
+ * @brief Reads a cached GLSL shader.
+ * @param cacheDirectory The cache directory.
+ * @param key The cache key.
+ * @param glsl Receives the file contents.
+ * @return True if the file exists and was read.
+ */
+auto ReadCachedShader(const std::string& cacheDirectory, const std::string& key, std::string& glsl) -> bool;
 
 } // namespace PresetShaderTranslator
 } // namespace MilkdropPreset

@@ -35,6 +35,7 @@ add_executable(projectM-unittest
         MilkdropShaderCommentParsingTest.cpp
         PCMTest.cpp
         PresetFileParserTest.cpp
+        PresetShaderTranslatorTest.cpp
         UtilsTest.cpp
         VolumeAtlasTest.cpp
         WaveformAlignerTest.cpp

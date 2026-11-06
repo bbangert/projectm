@@ -3,6 +3,7 @@
 #include "PresetFileParser.hpp"
 
 #include <MilkdropStaticShaders.hpp>
+#include <PresetShaderTranslatorVersion.hpp>
 
 #include <Renderer/Shader.hpp>
 #include <Renderer/TextureSamplerDescriptor.hpp>
@@ -14,7 +15,9 @@
 #include <Utils.hpp>
 
 #include <cctype>
+#include <fstream>
 #include <regex>
+#include <sstream>
 
 namespace libprojectM {
 namespace MilkdropPreset {
@@ -611,6 +614,59 @@ auto TranslateToGlsl(Stage stage, Target target, const std::string& preprocessed
     LOG_TRACE("[MilkdropShader] Transpiled GLSL " + shaderTypeString + " shader code:\n" + std::string(generator.GetResult()));
 
     return generator.GetResult();
+}
+
+auto TranslatorVersion() -> const char*
+{
+    return PROJECTM_PRESET_SHADER_TRANSLATOR_VERSION;
+}
+
+auto CacheKey(Stage stage, Target target, const std::string& preprocessedCode,
+              const Declarations& declarations) -> std::string
+{
+    // Each field is length- or count-prefixed, so different inputs can't produce the same text.
+    std::string keyInput = "projectM preset shader cache v1\n";
+    keyInput.append("translator ").append(TranslatorVersion()).append("\n");
+    keyInput.append("target ").append(TargetName(target)).append("\n");
+    keyInput.append("stage ").append(StageName(stage)).append("\n");
+    keyInput.append("samplers ").append(std::to_string(declarations.samplers.size())).append("\n");
+    for (const auto& declaration : declarations.samplers)
+    {
+        keyInput.append(std::to_string(declaration.size())).append(" ").append(declaration);
+    }
+    keyInput.append("texsizes ").append(std::to_string(declarations.texSizes.size())).append("\n");
+    for (const auto& declaration : declarations.texSizes)
+    {
+        keyInput.append(std::to_string(declaration.size())).append(" ").append(declaration);
+    }
+    keyInput.append("source ").append(std::to_string(preprocessedCode.size())).append("\n");
+    keyInput.append(preprocessedCode);
+
+    return Utils::Sha256Hex(keyInput);
+}
+
+auto CacheFileName(const std::string& key) -> std::string
+{
+    return key + ".glsl";
+}
+
+auto ReadCachedShader(const std::string& cacheDirectory, const std::string& key, std::string& glsl) -> bool
+{
+    std::ifstream file(cacheDirectory + "/" + CacheFileName(key), std::ios::in | std::ios::binary);
+    if (!file)
+    {
+        return false;
+    }
+
+    std::stringstream contents;
+    contents << file.rdbuf();
+    if (file.bad())
+    {
+        return false;
+    }
+
+    glsl = contents.str();
+    return !glsl.empty();
 }
 
 } // namespace PresetShaderTranslator

@@ -198,6 +198,12 @@ void projectm_set_texture_search_paths(projectm_handle instance,
     projectMInstance->SetTexturePaths(texturePaths);
 }
 
+void projectm_set_shader_cache_dir(projectm_handle instance, const char* path)
+{
+    auto projectMInstance = handle_to_instance(instance);
+    projectMInstance->SetPresetShaderCacheDirectory(path != nullptr ? path : "");
+}
+
 void projectm_reset_textures(projectm_handle instance)
 {
     auto projectMInstance = handle_to_instance(instance);
