@@ -19,7 +19,7 @@ for v in "$@"; do
     rm -rf "${WORK:?}/$v"
     mkdir -p "$WORK/$v"
     "$TRANSLATE" "$v" "$WORK/$v" < "$WORK/presets.txt" > "$WORK/$v.tsv"
-    find "$WORK/$v" -name '*.frag' | LC_ALL=C sort | xargs -r -P "$(nproc)" -n 40 "$HERE/check_glslang.sh" \
+    find "$WORK/$v" -name '*.frag' -print0 | LC_ALL=C sort -z | xargs -0 -r -P "$(nproc)" -n 40 "$HERE/check_glslang.sh" \
         | LC_ALL=C sort > "$WORK/$v.glslang.tsv"
     python3 "$HERE/summarize.py" "$WORK/$v.tsv" "$WORK/$v.glslang.tsv"
 done
