@@ -98,7 +98,16 @@ void Shader::CompileProgram(const std::string& vertexShaderSource,
                             const std::string& fragmentShaderSource)
 {
     auto vertexShader = CompileShader(vertexShaderSource, GL_VERTEX_SHADER);
-    auto fragmentShader = CompileShader(fragmentShaderSource, GL_FRAGMENT_SHADER);
+    GLuint fragmentShader{};
+    try
+    {
+        fragmentShader = CompileShader(fragmentShaderSource, GL_FRAGMENT_SHADER);
+    }
+    catch (const ShaderException&)
+    {
+        glDeleteShader(vertexShader);
+        throw;
+    }
 
     glAttachShader(m_shaderProgram, vertexShader);
     glAttachShader(m_shaderProgram, fragmentShader);
