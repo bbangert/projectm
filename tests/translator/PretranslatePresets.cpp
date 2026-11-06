@@ -9,7 +9,8 @@
 // a missing random texture makes the runtime key differ, which only costs a translation.
 //
 // Prints one TSV row per stage: path (relative to its preset dir), stage, status (ok|err), key,
-// error message. Exits 1 if a file can't be written, 2 on usage errors.
+// error message. Exits 1 if a preset directory can't be fully read or a file can't be written,
+// 2 on usage errors.
 
 #include "MilkdropPreset/PresetFileParser.hpp"
 #include "MilkdropPreset/PresetShaderTranslator.hpp"
@@ -42,7 +43,8 @@ auto OneLine(std::string text) -> std::string
     return text;
 }
 
-auto CollectPresets(const std::vector<std::string>& inputs, std::vector<PresetFile>& presets) -> bool
+// Returns the exit code: 0 if all inputs were read, 1 on a traversal error, 2 for a bad input.
+auto CollectPresets(const std::vector<std::string>& inputs, std::vector<PresetFile>& presets) -> int
 {
     for (const auto& input : inputs)
     {
@@ -53,10 +55,24 @@ auto CollectPresets(const std::vector<std::string>& inputs, std::vector<PresetFi
             std::vector<PresetFile> found;
             for (fs::recursive_directory_iterator it(inputPath, error), end; it != end && !error; it.increment(error))
             {
-                if (it->is_regular_file() && libprojectM::Utils::ToLower(it->path().extension().string()) == ".milk")
+                std::error_code typeError;
+                bool const isFile = it->is_regular_file(typeError);
+                // A dangling symlink is not found, which is no reason to stop.
+                if (typeError && typeError != std::errc::no_such_file_or_directory)
+                {
+                    std::cerr << "cannot read " << it->path().string() << ": " << typeError.message() << "\n";
+                    return 1;
+                }
+                if (isFile && libprojectM::Utils::ToLower(it->path().extension().string()) == ".milk")
                 {
                     found.push_back({it->path(), it->path().lexically_relative(inputPath).generic_string()});
                 }
+            }
+            if (error)
+            {
+                // The iterator is the end iterator after an error, so only the input is known.
+                std::cerr << "cannot read all of " << input << ": " << error.message() << "\n";
+                return 1;
             }
             std::sort(found.begin(), found.end(), [](const PresetFile& a, const PresetFile& b) { return a.displayPath < b.displayPath; });
             presets.insert(presets.end(), found.begin(), found.end());
@@ -68,10 +84,10 @@ auto CollectPresets(const std::vector<std::string>& inputs, std::vector<PresetFi
         else
         {
             std::cerr << "not a preset file or directory: " << input << "\n";
-            return false;
+            return 2;
         }
     }
-    return true;
+    return 0;
 }
 
 class Pretranslator
@@ -157,9 +173,13 @@ private:
         {
             std::ofstream file(temporaryPath, std::ios::out | std::ios::binary | std::ios::trunc);
             file << glsl;
+            // Closing flushes, which is where a small write fails, e.g. on a full filesystem.
+            file.close();
             if (!file)
             {
                 std::cerr << "cannot write " << temporaryPath << "\n";
+                std::error_code removeError;
+                fs::remove(temporaryPath, removeError);
                 return false;
             }
         }
@@ -208,9 +228,10 @@ int main(int argc, char** argv)
     }
 
     std::vector<PresetFile> presets;
-    if (!CollectPresets({arguments.begin() + 1, arguments.end()}, presets))
+    int const collectResult = CollectPresets({arguments.begin() + 1, arguments.end()}, presets);
+    if (collectResult != 0)
     {
-        return 2;
+        return collectResult;
     }
 
     fs::path const shaderDir = fs::path(arguments.front()) / "shaders";

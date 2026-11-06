@@ -41,3 +41,13 @@ foreach(_tool IN ITEMS translate pretranslate)
             FOLDER tests
             )
 endforeach()
+
+if(BUILD_TESTING)
+    add_test(NAME projectM-pretranslate-errors
+            COMMAND ${CMAKE_COMMAND}
+            "-DPRETRANSLATE=$<TARGET_FILE:projectM-pretranslate-presets>"
+            "-DPRESET=${PROJECTM_SOURCE_DIR}/presets/tests/270-warpcomp-shaders.milk"
+            "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/pretranslate-errors-test"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/PretranslateErrorsTest.cmake"
+            )
+endif()
