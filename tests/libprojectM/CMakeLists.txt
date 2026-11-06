@@ -27,6 +27,7 @@ test_api_headers(TestMainAPIHeaders
         )
 
 add_executable(projectM-unittest
+        GLSLGeneratorTest.cpp
         HLSLParserTest.cpp
         HLSLModuloTest.cpp
         LoggingTest.cpp
@@ -35,6 +36,7 @@ add_executable(projectM-unittest
         PCMTest.cpp
         PresetFileParserTest.cpp
         UtilsTest.cpp
+        VolumeAtlasTest.cpp
         WaveformAlignerTest.cpp
 
         $<TARGET_OBJECTS:Audio>

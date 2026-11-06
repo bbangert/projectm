@@ -116,6 +116,17 @@ void BlurTexture::Update(const Renderer::Texture& sourceTexture, const PerFrameC
         return;
     }
 
+    // Remember previously bound framebuffer. AllocateTextures() can resize m_blurFramebuffer, which unbinds it.
+    GLint origReadFramebuffer;
+    GLint origDrawFramebuffer;
+#ifdef USE_GLES2
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &origDrawFramebuffer);
+    origReadFramebuffer = origDrawFramebuffer;
+#else
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &origReadFramebuffer);
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &origDrawFramebuffer);
+#endif
+
     AllocateTextures(sourceTexture);
 
     unsigned int const passes = static_cast<int>(m_blurLevel) * 2;
@@ -142,17 +153,6 @@ void BlurTexture::Update(const Renderer::Texture& sourceTexture, const PerFrameC
     tempMax = (blurMax[2] - blurMin[1]) / (blurMax[1] - blurMin[1]);
     scale[2] = 1.0f / (tempMax - tempMin);
     bias[2] = -tempMin * scale[2];
-
-    // Remember previously bound framebuffer
-    GLint origReadFramebuffer;
-    GLint origDrawFramebuffer;
-#ifdef USE_GLES2
-    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &origDrawFramebuffer);
-    origReadFramebuffer = origDrawFramebuffer;
-#else
-    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &origReadFramebuffer);
-    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &origDrawFramebuffer);
-#endif
 
     m_blurFramebuffer.Bind(0);
 

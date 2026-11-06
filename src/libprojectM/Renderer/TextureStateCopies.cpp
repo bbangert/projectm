@@ -3,6 +3,7 @@
 #include "Renderer/CopyTexture.hpp"
 #include "Renderer/Texture.hpp"
 
+#include <GLSLGenerator.h>
 #include <Logging.hpp>
 
 namespace libprojectM {
@@ -30,6 +31,12 @@ auto TextureStateCopies::Resolve(ShaderCache& shaderCache, const std::shared_ptr
     if (!texture || texture->Empty() || texture->Type() != GL_TEXTURE_2D)
     {
         return texture;
+    }
+
+    if (texture->IsVolume())
+    {
+        // Texture::Bind() samples volume atlases with GL_CLAMP_TO_EDGE, whatever the sampler's wrap mode.
+        wrapMode = GL_CLAMP_TO_EDGE;
     }
 
     bool textureUsed = false;
@@ -62,8 +69,11 @@ auto TextureStateCopies::Resolve(ShaderCache& shaderCache, const std::shared_ptr
 
 auto TextureStateCopies::MakeCopy(ShaderCache& shaderCache, const Texture& texture) -> std::shared_ptr<Texture>
 {
-    const int width = texture.Width();
-    const int height = texture.Height();
+    // A volume atlas (the only volumes on GLES 2) reports the volume size, not the 2D texture's.
+    using Atlas = M4::GLSLGenerator::Texture3DAtlas;
+    const bool atlas = texture.IsVolume();
+    const int width = atlas ? static_cast<int>(Atlas::Width) : texture.Width();
+    const int height = atlas ? static_cast<int>(Atlas::Height) : texture.Height();
     if (width <= 0 || height <= 0)
     {
         return {};
@@ -74,10 +84,12 @@ auto TextureStateCopies::MakeCopy(ShaderCache& shaderCache, const Texture& textu
         m_copies.emplace_back();
     }
     auto& copy = m_copies.at(m_copiesUsed);
-    if (!copy || copy->Width() != width || copy->Height() != height)
+    if (!copy || copy->IsVolume() != atlas || copy->Width() != texture.Width() || copy->Height() != texture.Height())
     {
-        copy = std::make_shared<Texture>("sampler_state_copy", GL_TEXTURE_2D, width, height, 0,
-                                         GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE, false);
+        copy = atlas ? Texture::CreateVolumeAtlas("sampler_state_copy", nullptr, texture.Width(),
+                                                  GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE)
+                     : std::make_shared<Texture>("sampler_state_copy", GL_TEXTURE_2D, width, height, 0,
+                                                 GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE, false);
     }
 
     GLint previousFramebuffer{};

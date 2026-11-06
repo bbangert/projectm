@@ -54,13 +54,15 @@ public:
     static auto HighQuality() -> std::shared_ptr<Texture>;
 
     /**
-     * Low-quality (high frequency) 3D noise texture, 32x32 with zoom level 1
+     * Low-quality (high frequency) 3D noise texture, 32x32 with zoom level 1.
+     * With USE_GLES2 (no 3D textures), it is a 2D slice atlas, see Texture::CreateVolumeAtlas().
      * @return A new noise texture ready for use in rendering.
      */
     static auto LowQualityVolume() -> std::shared_ptr<Texture>;
 
     /**
-     * High-quality (low frequency) 3D noise texture, 32x32 with zoom level 4
+     * High-quality (low frequency) 3D noise texture, 32x32 with zoom level 4.
+     * With USE_GLES2 (no 3D textures), it is a 2D slice atlas, see Texture::CreateVolumeAtlas().
      * @return A new noise texture ready for use in rendering.
      */
     static auto HighQualityVolume() -> std::shared_ptr<Texture>;

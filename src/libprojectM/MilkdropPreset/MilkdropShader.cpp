@@ -5,6 +5,7 @@
 
 #include <MilkdropStaticShaders.hpp>
 
+#include <Engine.h>
 #include <GLSLGenerator.h>
 #include <HLSLParser.h>
 #include <Logging.hpp>
@@ -701,12 +702,16 @@ void MilkdropShader::TranspileHLSLShader(const PresetState& presetState, std::st
     M4::HLSLTree tree(&allocator);
     M4::HLSLParser parser(&allocator, &tree);
 
+    // hlslparser only logs errors, keep the first one for the exception message.
+    M4::Log_ClearFirstError();
+    auto firstError = []() { return std::string(M4::Log_GetFirstError()); };
+
     // Preprocess define macros
     std::string sourcePreprocessed;
     if (!parser.ApplyPreprocessor("", program.c_str(), program.size(), sourcePreprocessed))
     {
         LOG_DEBUG("[MilkdropShader] Failed " + shaderTypeString + " shader code:\n" + program);
-        throw Renderer::ShaderException("Error translating HLSL " + shaderTypeString + " shader: Preprocessing failed.");
+        throw Renderer::ShaderException("Error translating HLSL " + shaderTypeString + " shader: Preprocessing failed: " + firstError());
     }
 
     // Remove previous shader declarations
@@ -754,17 +759,24 @@ void MilkdropShader::TranspileHLSLShader(const PresetState& presetState, std::st
     {
         LOG_DEBUG("[MilkdropShader] Failed " + shaderTypeString + " shader code:\n" + program);
         LOG_DEBUG("[MilkdropShader] Failed preprocessed " + shaderTypeString + " shader code:\n" + sourcePreprocessed);
-        throw Renderer::ShaderException("[MilkdropShader] Error translating HLSL " + shaderTypeString + " shader: HLSL parsing failed.");
+        throw Renderer::ShaderException("[MilkdropShader] Error translating HLSL " + shaderTypeString + " shader: HLSL parsing failed: " + firstError());
     }
 
     // Then generate GLSL from the resulting parser tree
+    unsigned int generatorFlags = M4::GLSLGenerator::Flag_AlternateNanPropagation;
+#ifdef USE_GLES2
+    // projectM never mipmaps, so ignoring LODs is exact. The noise volumes are 2D atlases (MilkdropNoise).
+    generatorFlags |= M4::GLSLGenerator::Flag_NoTextureLod |
+                      M4::GLSLGenerator::Flag_NoDerivatives |
+                      M4::GLSLGenerator::Flag_Texture3DAtlas;
+#endif
     if (!generator.Generate(&tree, M4::GLSLGenerator::Target_FragmentShader,
                             MilkdropStaticShaders::Get()->GetGlslGeneratorVersion(),
-                            "PS", M4::GLSLGenerator::Options(M4::GLSLGenerator::Flag_AlternateNanPropagation)))
+                            "PS", M4::GLSLGenerator::Options(generatorFlags)))
     {
         LOG_DEBUG("[MilkdropShader] Failed " + shaderTypeString + " shader code:\n" + program);
         LOG_DEBUG("[MilkdropShader] Failed preprocessed " + shaderTypeString + " shader code:\n" + sourcePreprocessed);
-        throw Renderer::ShaderException("[MilkdropShader] Error translating HLSL " + shaderTypeString + " shader: GLSL generating failed.\nSource:\n" + sourcePreprocessed);
+        throw Renderer::ShaderException("[MilkdropShader] Error translating HLSL " + shaderTypeString + " shader: GLSL generating failed: " + firstError() + "\nSource:\n" + sourcePreprocessed);
     }
 
     LOG_TRACE("[MilkdropShader] Transpiled GLSL " + shaderTypeString + " shader code:\n" + std::string(generator.GetResult()));

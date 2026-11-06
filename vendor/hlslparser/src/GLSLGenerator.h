@@ -44,6 +44,32 @@ public:
         Flag_PackMatrixRowMajor = 1 << 2,
         Flag_LowerMatrixMultiplication = 1 << 3,
         Flag_AlternateNanPropagation = 1 << 4,
+        /// GLSL 1.x / ES 1.00: sample the base level for tex2Dlod, tex2Dgrad and texCUBElod instead of
+        /// requiring a texture LOD extension. Exact for textures without mipmaps.
+        Flag_NoTextureLod = 1 << 5,
+        /// GLSL ES 1.00: fail when ddx, ddy or fwidth are used instead of requiring
+        /// GL_OES_standard_derivatives.
+        Flag_NoDerivatives = 1 << 6,
+        /// Targets without 3D textures: sampler3D is declared as sampler2D and tex3D/tex3Dlod sample
+        /// a 2D atlas of the volume's slices instead, see Texture3DAtlas.
+        Flag_Texture3DAtlas = 1 << 7,
+    };
+
+    /// Layout of the atlas used with Flag_Texture3DAtlas. Slice z of a VolumeSize^3 volume is the
+    /// tile at column z % TileColumns, row z / TileColumns (in texture coordinate order). Each tile
+    /// holds the slice with a one-texel border copied from the opposite edges, so bilinear filtering
+    /// inside a tile wraps like GL_REPEAT. tex3D does two bilinear taps (the slices next to p.z) and
+    /// interpolates between them, which matches trilinear filtering of the volume with GL_REPEAT.
+    struct Texture3DAtlas
+    {
+        enum
+        {
+            VolumeSize = 32,
+            TileColumns = 8,
+            TileSize = VolumeSize + 2,
+            Width = TileSize * TileColumns,
+            Height = TileSize * (VolumeSize / TileColumns),
+        };
     };
 
     struct Options
@@ -77,6 +103,18 @@ private:
         AttributeModifier_Out,
     };
 
+    /// GLSL 1.10 and GLSL ES 1.00 only have square matrices.
+    bool HasNonSquareMatrices() const { return m_version != Version_110 && m_version != Version_100_ES; }
+    /// GLSL 1.10 and GLSL ES 1.00 have neither array constructors nor array initializers.
+    bool HasArrayConstructors() const { return m_version != Version_110 && m_version != Version_100_ES; }
+
+    /// The GLSL type name, with non-square matrices padded to square ones if the target lacks them.
+    const char* GetTypeName(const HLSLType& type) const;
+    void OutputPaddedMatrixOperand(HLSLExpression* expression, const HLSLType& type, int size);
+    void OutputPaddedMatrixMultiply(HLSLExpression* argument[2], const HLSLType& type0, const HLSLType& type1,
+                                    const HLSLType& resultType);
+    void OutputPaddingTruncation(const HLSLType& type, int paddedSize);
+    void OutputExtensions();
     void OutputExpressionList(HLSLExpression* expression, HLSLArgument* argument = NULL);
     void OutputExpression(HLSLExpression* expression, const HLSLType* dstType = NULL);
     void OutputIdentifier(const char* name);
@@ -96,6 +134,8 @@ private:
 	void OutputDeclarationBody( const HLSLType& type, const char* name );
     void OutputDeclaration(const HLSLType& type, const char* name);
     void OutputDeclarationAssignment(HLSLDeclaration* declaration);
+    void OutputArrayElementAssignments(HLSLDeclaration* declaration);
+    static int CountArrayElements(HLSLDeclaration* declaration);
     void OutputCast(const HLSLType& type);
 
     void OutputSetOutAttribute(const char* semantic, const char* resultName);
@@ -157,6 +197,7 @@ private:
     char                m_tex2DbiasFunction[64];
     char                m_tex2DgradFunction[64];
     char                m_tex3DlodFunction[64];
+    char                m_tex3DAtlasFunction[64];
     char                m_texCUBEbiasFunction[64];
     char                m_texCUBElodFunction[64];
     char                m_scalarSwizzle2Function[64];
@@ -165,6 +206,7 @@ private:
     char                m_sinCosFunction[64];
     char                m_bvecTernary[64];
     char                m_modfFunction[64];
+    char                m_roundFunction[64];
     char                m_acosFunction[64];
     char                m_asinFunction[64];
     char                m_altMultFunction[64];

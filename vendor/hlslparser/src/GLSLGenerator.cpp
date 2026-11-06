@@ -43,7 +43,7 @@ const char* GLSLGenerator::s_reservedWord[] =
 		"main",
     };
 
-static const char* GetTypeName(const HLSLType& type)
+static const char* GetGLSLTypeName(const HLSLType& type)
 {
     switch (type.baseType)
     {
@@ -85,6 +85,52 @@ static const char* GetTypeName(const HLSLType& type)
         ASSERT(0);
         return "?";
     }
+}
+
+static bool IsNonSquareMatrixType(HLSLBaseType baseType)
+{
+    if (!IsMatrixType(baseType))
+    {
+        return false;
+    }
+    const BaseTypeDescription& description = baseTypeDescriptions[baseType];
+    return description.numComponents != description.height;
+}
+
+// Matrices are N x N, vectors have N components, scalars count as 1.
+static int GetPaddedMatrixSize(const HLSLType& type)
+{
+    const BaseTypeDescription& description = baseTypeDescriptions[type.baseType];
+    if (IsMatrixType(type.baseType))
+    {
+        return std::max(description.numComponents, description.height);
+    }
+    return IsVectorType(type.baseType) ? description.numComponents : 1;
+}
+
+static const char* GetSquareMatrixTypeName(int size)
+{
+    switch (size)
+    {
+    case 2: return "mat2";
+    case 3: return "mat3";
+    default: return "mat4";
+    }
+}
+
+const char* GLSLGenerator::GetTypeName(const HLSLType& type) const
+{
+    // An HLSL RxC matrix is a GLSL matCxR with m[c][r] == M[r][c]. Without non-square matrices
+    // it is stored zero-padded in a square matN, N = max(R, C), with the same element mapping.
+    if (!HasNonSquareMatrices() && IsNonSquareMatrixType(type.baseType))
+    {
+        return GetSquareMatrixTypeName(GetPaddedMatrixSize(type));
+    }
+    if ((m_options.flags & Flag_Texture3DAtlas) && type.baseType == HLSLBaseType_Sampler3D)
+    {
+        return "sampler2D";
+    }
+    return GetGLSLTypeName(type);
 }
 
 static bool GetCanImplicitCast(const HLSLType& srcType, const HLSLType& dstType)
@@ -131,6 +177,7 @@ GLSLGenerator::GLSLGenerator() :
     m_tex2DlodFunction[0]       = 0;
     m_tex2DbiasFunction[0]      = 0;
     m_tex3DlodFunction[0]       = 0;
+    m_tex3DAtlasFunction[0]     = 0;
     m_texCUBEbiasFunction[0]    = 0;
     m_texCUBElodFunction[0]     = 0;
     m_scalarSwizzle2Function[0] = 0;
@@ -139,6 +186,7 @@ GLSLGenerator::GLSLGenerator() :
     m_sinCosFunction[0]         = 0;
     m_bvecTernary[0]            = 0;
     m_modfFunction[0]           = 0;
+    m_roundFunction[0]          = 0;
     m_acosFunction[0]           = 0;
     m_asinFunction[0]           = 0;
     m_altMultFunction[0]        = 0;
@@ -166,9 +214,11 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
     ChooseUniqueName("tex2Dbias", m_tex2DbiasFunction, sizeof(m_tex2DbiasFunction));
     ChooseUniqueName("tex2Dgrad", m_tex2DgradFunction, sizeof(m_tex2DgradFunction));
     ChooseUniqueName("tex3Dlod", m_tex3DlodFunction, sizeof(m_tex3DlodFunction));
+    ChooseUniqueName("tex3Datlas", m_tex3DAtlasFunction, sizeof(m_tex3DAtlasFunction));
     ChooseUniqueName("texCUBEbias", m_texCUBEbiasFunction, sizeof(m_texCUBEbiasFunction));
 	ChooseUniqueName( "texCUBElod", m_texCUBElodFunction, sizeof( m_texCUBElodFunction ) );
 	ChooseUniqueName( "modf", m_modfFunction, sizeof( m_modfFunction ) );
+	ChooseUniqueName( "round", m_roundFunction, sizeof( m_roundFunction ) );
 	ChooseUniqueName( "acos", m_acosFunction, sizeof( m_acosFunction ) );
 	ChooseUniqueName( "asin", m_asinFunction, sizeof( m_asinFunction ) );
 	ChooseUniqueName( "mult", m_altMultFunction, sizeof( m_altMultFunction ) );
@@ -210,13 +260,22 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
         return false;
     }
 
+    if ((m_options.flags & Flag_NoDerivatives) &&
+        (m_tree->NeedsFunction("ddx") || m_tree->NeedsFunction("ddy") || m_tree->NeedsFunction("fwidth")))
+    {
+        Error("ddx/ddy/fwidth need screen-space derivatives, which the target does not support");
+        return false;
+    }
+
     if (m_version == Version_110)
     {
         m_writer.WriteLine(0, "#version 110");
+        OutputExtensions();
     }
     if (m_version == Version_120)
     {
         m_writer.WriteLine(0, "#version 120");
+        OutputExtensions();
     }
     else if (m_version == Version_140)
     {
@@ -241,6 +300,7 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
     else if (m_version == Version_100_ES)
     {
         m_writer.WriteLine(0, "#version 100");
+        OutputExtensions();
         m_writer.WriteLine(0, "precision highp float;");
     }
     else if (m_version == Version_300_ES)
@@ -258,24 +318,33 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
     // Output the special function used to access rows in a matrix.
     m_writer.WriteLine(0, "vec2 %s(mat2 m, int i) { return vec2( m[0][i], m[1][i] ); }", m_matrixRowFunction);
     m_writer.WriteLine(0, "vec2 %s(mat2 m, float i_float) { int i=int(i_float); return vec2( m[0][i], m[1][i] ); }", m_matrixRowFunction);
-    m_writer.WriteLine(0, "vec2 %s(mat2x3 m, int i) { return vec2( m[0][i], m[1][i]); }", m_matrixRowFunction);
-    m_writer.WriteLine(0, "vec2 %s(mat2x3 m, float i_float) { int i=int(i_float); return vec2( m[0][i], m[1][i]); }", m_matrixRowFunction);
-    m_writer.WriteLine(0, "vec2 %s(mat2x4 m, int i) { return vec2( m[0][i], m[1][i]); }", m_matrixRowFunction);
-    m_writer.WriteLine(0, "vec2 %s(mat2x4 m, float i_float) { int i=int(i_float); return vec2( m[0][i], m[1][i]); }", m_matrixRowFunction);
+    if (HasNonSquareMatrices())
+    {
+        m_writer.WriteLine(0, "vec2 %s(mat2x3 m, int i) { return vec2( m[0][i], m[1][i]); }", m_matrixRowFunction);
+        m_writer.WriteLine(0, "vec2 %s(mat2x3 m, float i_float) { int i=int(i_float); return vec2( m[0][i], m[1][i]); }", m_matrixRowFunction);
+        m_writer.WriteLine(0, "vec2 %s(mat2x4 m, int i) { return vec2( m[0][i], m[1][i]); }", m_matrixRowFunction);
+        m_writer.WriteLine(0, "vec2 %s(mat2x4 m, float i_float) { int i=int(i_float); return vec2( m[0][i], m[1][i]); }", m_matrixRowFunction);
+    }
 
     m_writer.WriteLine(0, "vec3 %s(mat3 m, int i) { return vec3( m[0][i], m[1][i], m[2][i] ); }", m_matrixRowFunction);
     m_writer.WriteLine(0, "vec3 %s(mat3 m, float i_float) { int i=int(i_float); return vec3( m[0][i], m[1][i], m[2][i] ); }", m_matrixRowFunction);
-    m_writer.WriteLine(0, "vec3 %s(mat3x2 m, int i) { return vec3( m[0][i], m[1][i], m[2][i] ); }", m_matrixRowFunction);
-    m_writer.WriteLine(0, "vec3 %s(mat3x2 m, float i_float) { int i=int(i_float); return vec3( m[0][i], m[1][i], m[2][i] ); }", m_matrixRowFunction);
-    m_writer.WriteLine(0, "vec3 %s(mat3x4 m, int i) { return vec3( m[0][i], m[1][i], m[2][i] ); }", m_matrixRowFunction);
-    m_writer.WriteLine(0, "vec3 %s(mat3x4 m, float i_float) { int i=int(i_float); return vec3( m[0][i], m[1][i], m[2][i] ); }", m_matrixRowFunction);
+    if (HasNonSquareMatrices())
+    {
+        m_writer.WriteLine(0, "vec3 %s(mat3x2 m, int i) { return vec3( m[0][i], m[1][i], m[2][i] ); }", m_matrixRowFunction);
+        m_writer.WriteLine(0, "vec3 %s(mat3x2 m, float i_float) { int i=int(i_float); return vec3( m[0][i], m[1][i], m[2][i] ); }", m_matrixRowFunction);
+        m_writer.WriteLine(0, "vec3 %s(mat3x4 m, int i) { return vec3( m[0][i], m[1][i], m[2][i] ); }", m_matrixRowFunction);
+        m_writer.WriteLine(0, "vec3 %s(mat3x4 m, float i_float) { int i=int(i_float); return vec3( m[0][i], m[1][i], m[2][i] ); }", m_matrixRowFunction);
+    }
 
     m_writer.WriteLine(0, "vec4 %s(mat4 m, int i) { return vec4( m[0][i], m[1][i], m[2][i], m[3][i] ); }", m_matrixRowFunction);
     m_writer.WriteLine(0, "vec4 %s(mat4 m, float i_float) { int i=int(i_float); return vec4( m[0][i], m[1][i], m[2][i], m[3][i] ); }", m_matrixRowFunction);
-    m_writer.WriteLine(0, "vec4 %s(mat4x3 m, int i) { return vec4( m[0][i], m[1][i], m[2][i], m[3][i] ); }", m_matrixRowFunction);
-    m_writer.WriteLine(0, "vec4 %s(mat4x3 m, float i_float) { int i=int(i_float); return vec4( m[0][i], m[1][i], m[2][i], m[3][i] ); }", m_matrixRowFunction);
-    m_writer.WriteLine(0, "vec4 %s(mat4x2 m, int i) { return vec4( m[0][i], m[1][i], m[2][i], m[3][i] ); }", m_matrixRowFunction);
-    m_writer.WriteLine(0, "vec4 %s(mat4x2 m, float i_float) { int i=int(i_float); return vec4( m[0][i], m[1][i], m[2][i], m[3][i] ); }", m_matrixRowFunction);
+    if (HasNonSquareMatrices())
+    {
+        m_writer.WriteLine(0, "vec4 %s(mat4x3 m, int i) { return vec4( m[0][i], m[1][i], m[2][i], m[3][i] ); }", m_matrixRowFunction);
+        m_writer.WriteLine(0, "vec4 %s(mat4x3 m, float i_float) { int i=int(i_float); return vec4( m[0][i], m[1][i], m[2][i], m[3][i] ); }", m_matrixRowFunction);
+        m_writer.WriteLine(0, "vec4 %s(mat4x2 m, int i) { return vec4( m[0][i], m[1][i], m[2][i], m[3][i] ); }", m_matrixRowFunction);
+        m_writer.WriteLine(0, "vec4 %s(mat4x2 m, float i_float) { int i=int(i_float); return vec4( m[0][i], m[1][i], m[2][i], m[3][i] ); }", m_matrixRowFunction);
+    }
 
     // Output the special function used to do matrix cast for OpenGL 2.0
     if (m_versionLegacy)
@@ -306,38 +375,43 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
     }
 
     // Output the special function used to emulate tex2Dlod.
-    if (m_tree->NeedsFunction("tex2Dlod"))
+    bool const baseLevelOnly = m_versionLegacy && (m_options.flags & Flag_NoTextureLod);
+    if (m_tree->NeedsFunction("tex2Dlod") && baseLevelOnly)
+    {
+        m_writer.WriteLine(0, "vec4 %s(sampler2D samp, vec4 texCoord) { return texture2D(samp, texCoord.xy);  }", m_tex2DlodFunction);
+    }
+    else if (m_tree->NeedsFunction("tex2Dlod"))
     {
         const char* function = "textureLod";
 
-        if (m_versionLegacy)
+        if (m_version == Version_100_ES)
         {
-            m_writer.WriteLine(0, "#extension GL_ARB_shader_texture_lod : require");
-            function = "texture2DLod";
-        }
-        else if (m_version == Version_100_ES)
-        {
-            m_writer.WriteLine(0, "#extension GL_EXT_shader_texture_lod : require");
             function = "texture2DLodEXT";
+        }
+        else if (m_versionLegacy)
+        {
+            function = "texture2DLod";
         }
 
         m_writer.WriteLine(0, "vec4 %s(sampler2D samp, vec4 texCoord) { return %s(samp, texCoord.xy, texCoord.w);  }", m_tex2DlodFunction, function);
     }
 
     // Output the special function used to emulate tex2Dgrad.
-    if (m_tree->NeedsFunction("tex2Dgrad"))
+    if (m_tree->NeedsFunction("tex2Dgrad") && baseLevelOnly)
+    {
+        m_writer.WriteLine(0, "vec4 %s(sampler2D samp, vec2 texCoord, vec2 dx, vec2 dy) { return texture2D(samp, texCoord);  }", m_tex2DgradFunction);
+    }
+    else if (m_tree->NeedsFunction("tex2Dgrad"))
     {
         const char* function = "textureGrad";
 
-        if (m_versionLegacy)
+        if (m_version == Version_100_ES)
         {
-            m_writer.WriteLine(0, "#extension GL_ARB_shader_texture_lod : require");
-            function = "texture2DGradARB";
-        }
-        else if (m_version == Version_100_ES)
-        {
-            m_writer.WriteLine(0, "#extension GL_EXT_shader_texture_lod : require");
             function = "texture2DGradEXT";
+        }
+        else if (m_versionLegacy)
+        {
+            function = "texture2DGradARB";
         }
 
         m_writer.WriteLine(0, "vec4 %s(sampler2D samp, vec2 texCoord, vec2 dx, vec2 dy) { return %s(samp, texCoord, dx, dy);  }", m_tex2DgradFunction, function);
@@ -365,8 +439,32 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
         m_writer.WriteLine(0, "}");
     }
 
+    // Output the special functions used to sample a 3D texture stored as a 2D atlas.
+    if ((m_options.flags & Flag_Texture3DAtlas) && (m_tree->NeedsFunction("tex3D") || m_tree->NeedsFunction("tex3Dlod")))
+    {
+        typedef Texture3DAtlas Atlas;
+        const char* sample = m_versionLegacy ? "texture2D" : "texture";
+        m_writer.WriteLine(0, "vec4 %s(sampler2D s, vec3 p) {", m_tex3DAtlasFunction);
+        m_writer.WriteLine(1, "p = fract(p);");
+        m_writer.WriteLine(1, "float z = p.z * %d.0 - 0.5;", Atlas::VolumeSize);
+        m_writer.WriteLine(1, "float z0 = floor(z);");
+        m_writer.WriteLine(1, "float s0 = mod(z0 + %d.0, %d.0);", Atlas::VolumeSize, Atlas::VolumeSize);
+        m_writer.WriteLine(1, "float s1 = mod(z0 + 1.0, %d.0);", Atlas::VolumeSize);
+        m_writer.WriteLine(1, "vec2 t0 = vec2(mod(s0, %d.0), floor(s0 / %d.0));", Atlas::TileColumns, Atlas::TileColumns);
+        m_writer.WriteLine(1, "vec2 t1 = vec2(mod(s1, %d.0), floor(s1 / %d.0));", Atlas::TileColumns, Atlas::TileColumns);
+        m_writer.WriteLine(1, "vec2 uv = p.xy * %d.0 + 1.0;", Atlas::VolumeSize);
+        m_writer.WriteLine(1, "vec2 scale = vec2(1.0 / %d.0, 1.0 / %d.0);", Atlas::Width, Atlas::Height);
+        m_writer.WriteLine(1, "return mix(%s(s, (t0 * %d.0 + uv) * scale), %s(s, (t1 * %d.0 + uv) * scale), z - z0);",
+                           sample, Atlas::TileSize, sample, Atlas::TileSize);
+        m_writer.WriteLine(0, "}");
+    }
+
     // Output the special function used to emulate tex3Dlod.
-    if (m_tree->NeedsFunction("tex3Dlod"))
+    if (m_tree->NeedsFunction("tex3Dlod") && (m_options.flags & Flag_Texture3DAtlas))
+    {
+        m_writer.WriteLine(0, "vec4 %s(sampler2D samp, vec4 texCoord) { return %s(samp, texCoord.xyz);  }", m_tex3DlodFunction, m_tex3DAtlasFunction);
+    }
+    else if (m_tree->NeedsFunction("tex3Dlod"))
     {
         m_writer.WriteLine(0, "vec4 %s(sampler3D samp, vec4 texCoord) { return %s(samp, texCoord.xyz, texCoord.w);  }", m_tex3DlodFunction, m_versionLegacy ? "texture3D" : "texture" );
     }
@@ -386,18 +484,20 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
     }
 
 	// Output the special function used to emulate texCUBElod
-	if (m_tree->NeedsFunction("texCUBElod"))
+	if (m_tree->NeedsFunction("texCUBElod") && baseLevelOnly)
+	{
+        m_writer.WriteLine(0, "vec4 %s(samplerCube samp, vec4 texCoord) { return textureCube(samp, texCoord.xyz);  }", m_texCUBElodFunction);
+	}
+	else if (m_tree->NeedsFunction("texCUBElod"))
 	{
         const char* function = "textureLod";
 
         if (m_version == Version_110 || m_version == Version_120)
         {
-            m_writer.WriteLine(0, "#extension GL_ARB_shader_texture_lod : require");
             function = "textureCubeLod";
         }
         else if (m_version == Version_100_ES)
         {
-            m_writer.WriteLine(0, "#extension GL_EXT_shader_texture_lod : require");
             function = "textureCubeLodEXT";
         }
 
@@ -408,10 +508,18 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
     {
         if (m_version == Version_110 || m_version == Version_120 || m_version == Version_100_ES)
         {
-            m_writer.WriteLine(0, "float %s(float x, out float ip) { ip = int(x); return x - ip; }", m_modfFunction);
+            m_writer.WriteLine(0, "float %s(float x, out float ip) { ip = x < 0.0 ? ceil(x) : floor(x); return x - ip; }", m_modfFunction);
         } else {
             m_writer.WriteLine(0, "float %s(float x, out float ip) { return modf(x, ip); }", m_modfFunction);
         }
+    }
+    // round() only exists from GLSL 1.30 and GLSL ES 3.00 on.
+    if (m_versionLegacy && m_tree->NeedsFunction("round"))
+    {
+        m_writer.WriteLine(0, "float %s(float x) { return floor(x + 0.5); }", m_roundFunction);
+        m_writer.WriteLine(0, "vec2 %s(vec2 x) { return floor(x + 0.5); }", m_roundFunction);
+        m_writer.WriteLine(0, "vec3 %s(vec3 x) { return floor(x + 0.5); }", m_roundFunction);
+        m_writer.WriteLine(0, "vec4 %s(vec4 x) { return floor(x + 0.5); }", m_roundFunction);
     }
     if (m_tree->NeedsFunction("acos"))
     {
@@ -489,23 +597,17 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
     m_tree->EnumerateMatrixCtorsNeeded(matrixCtors);
     for(matrixCtor & ctor : matrixCtors)
     {
-        std::string id = GetTypeName(HLSLType(ctor.matrixType));
+        std::string id = GetGLSLTypeName(HLSLType(ctor.matrixType));
         id += "_from";
         for(HLSLBaseType argType : ctor.argumentTypes)
         {
             id += "_";
-            id += GetTypeName(HLSLType(argType));
+            id += GetGLSLTypeName(HLSLType(argType));
         }
         matrixCtorsId[ctor] = id;
     }
 
     OutputMatrixCtors();
-
-    // Output the extension used for dFdx/dFdy in GLES2
-    if (m_version == Version_100_ES && (m_tree->NeedsFunction("ddx") || m_tree->NeedsFunction("ddy")))
-    {
-        m_writer.WriteLine(0, "#extension GL_OES_standard_derivatives : require");
-    }
 
     OutputAttributes(entryFunction);
 
@@ -531,6 +633,88 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
 
     return !m_error;
 
+}
+
+void GLSLGenerator::OutputExtensions()
+{
+    // #extension directives must come before any non-preprocessor token.
+    if (!(m_options.flags & Flag_NoTextureLod) &&
+        (m_tree->NeedsFunction("tex2Dlod") || m_tree->NeedsFunction("tex2Dgrad") || m_tree->NeedsFunction("texCUBElod")))
+    {
+        if (m_version == Version_100_ES)
+        {
+            m_writer.WriteLine(0, "#extension GL_EXT_shader_texture_lod : require");
+        }
+        else if (m_version == Version_110 || m_version == Version_120)
+        {
+            m_writer.WriteLine(0, "#extension GL_ARB_shader_texture_lod : require");
+        }
+    }
+
+    if (m_version == Version_100_ES &&
+        (m_tree->NeedsFunction("ddx") || m_tree->NeedsFunction("ddy") || m_tree->NeedsFunction("fwidth")))
+    {
+        m_writer.WriteLine(0, "#extension GL_OES_standard_derivatives : require");
+    }
+}
+
+void GLSLGenerator::OutputPaddedMatrixOperand(HLSLExpression* expression, const HLSLType& type, int size)
+{
+    int const typeSize = GetPaddedMatrixSize(type);
+    if (typeSize >= size || (!IsMatrixType(type.baseType) && !IsVectorType(type.baseType)))
+    {
+        OutputExpression(expression, &type);
+        return;
+    }
+
+    if (IsMatrixType(type.baseType))
+    {
+        // A larger matrix constructed from a padded one keeps the zero padding apart from a 1 on
+        // the diagonal, which the products below never pick up.
+        m_writer.Write("%s(", GetSquareMatrixTypeName(size));
+        OutputExpression(expression, &type);
+        m_writer.Write(")");
+        return;
+    }
+
+    m_writer.Write("vec%d(", size);
+    OutputExpression(expression, &type);
+    for (int i = typeSize; i < size; i++)
+    {
+        m_writer.Write(", 0.0");
+    }
+    m_writer.Write(")");
+}
+
+void GLSLGenerator::OutputPaddedMatrixMultiply(HLSLExpression* argument[2], const HLSLType& type0, const HLSLType& type1,
+                                               const HLSLType& resultType)
+{
+    // Pad vectors and matrices to the same size, multiply, then drop the padding of the result.
+    int const size = std::max(GetPaddedMatrixSize(type0), GetPaddedMatrixSize(type1));
+    bool const resizeResult = IsMatrixType(resultType.baseType) && GetPaddedMatrixSize(resultType) != size;
+
+    if (resizeResult)
+    {
+        m_writer.Write("%s(", GetTypeName(resultType));
+    }
+    m_writer.Write("((");
+    OutputPaddedMatrixOperand(argument[0], type0, size);
+    m_writer.Write(")*(");
+    OutputPaddedMatrixOperand(argument[1], type1, size);
+    m_writer.Write("))");
+    if (resizeResult)
+    {
+        m_writer.Write(")");
+    }
+    OutputPaddingTruncation(resultType, size);
+}
+
+void GLSLGenerator::OutputPaddingTruncation(const HLSLType& type, int paddedSize)
+{
+    if (IsVectorType(type.baseType) && baseTypeDescriptions[type.baseType].numComponents < paddedSize)
+    {
+        m_writer.Write(".%.*s", baseTypeDescriptions[type.baseType].numComponents, "xyzw");
+    }
 }
 
 const char* GLSLGenerator::GetResult() const
@@ -916,6 +1100,10 @@ void GLSLGenerator::OutputExpression(HLSLExpression* expression, const HLSLType*
             m_writer.Write(",");
             OutputExpression(arrayAccess->index);
             m_writer.Write(")");
+            if (!HasNonSquareMatrices() && IsNonSquareMatrixType(arrayAccess->array->expressionType.baseType))
+            {
+                OutputPaddingTruncation(arrayAccess->expressionType, GetPaddedMatrixSize(arrayAccess->array->expressionType));
+            }
         }
         else
         {
@@ -956,6 +1144,10 @@ void GLSLGenerator::OutputExpression(HLSLExpression* expression, const HLSLType*
                 OutputExpression(argument[1], &type1);
                 m_writer.Write("))");
             }
+            else if (!HasNonSquareMatrices() && (IsNonSquareMatrixType(type0.baseType) || IsNonSquareMatrixType(type1.baseType)))
+            {
+                OutputPaddedMatrixMultiply(argument, type0, type1, functionCall->function->returnType);
+            }
             else
             {
                 m_writer.Write("((");
@@ -965,6 +1157,18 @@ void GLSLGenerator::OutputExpression(HLSLExpression* expression, const HLSLType*
                 m_writer.Write("))");
             }
 
+            handled = true;
+        }
+        else if (String_Equal(functionName, "saturate") && m_versionLegacy && functionCall->argument != NULL &&
+                 functionCall->argument->expressionType.baseType >= HLSLBaseType_Int &&
+                 functionCall->argument->expressionType.baseType <= HLSLBaseType_Int4)
+        {
+            // No integer clamp() before GLSL 1.30 / GLSL ES 3.00.
+            const HLSLType& intType = functionCall->argument->expressionType;
+            HLSLType floatType(static_cast<HLSLBaseType>(HLSLBaseType_Float + (intType.baseType - HLSLBaseType_Int)));
+            m_writer.Write("%s(clamp(", GetTypeName(intType));
+            OutputExpression(functionCall->argument, &floatType);
+            m_writer.Write(", 0.0, 1.0))");
             handled = true;
         }
         else if (String_Equal(functionName, "saturate"))
@@ -1158,7 +1362,14 @@ void GLSLGenerator::OutputIdentifier(const char* name)
     }
     else if (String_Equal(name, "tex3D"))
     {
-        name = m_versionLegacy ? "texture3D" : "texture";
+        if (m_options.flags & Flag_Texture3DAtlas)
+        {
+            name = m_tex3DAtlasFunction;
+        }
+        else
+        {
+            name = m_versionLegacy ? "texture3D" : "texture";
+        }
     }
     else if (String_Equal(name, "clip"))
     {
@@ -1179,6 +1390,10 @@ void GLSLGenerator::OutputIdentifier(const char* name)
     else if (String_Equal(name, "tex2DArray"))
     {
         name = "texture";
+    }
+    else if (String_Equal(name, "tex3Dlod"))
+    {
+        name = m_tex3DlodFunction;
     }
     else if (String_Equal(name, "texCUBEbias"))
     {
@@ -1226,6 +1441,10 @@ void GLSLGenerator::OutputIdentifier(const char* name)
     else if (String_Equal(name, "acos"))
     {
         name = m_acosFunction;
+    }
+    else if (m_versionLegacy && String_Equal(name, "round"))
+    {
+        name = m_roundFunction;
     }
     else if (String_Equal(name, "asin"))
     {
@@ -2033,6 +2252,12 @@ void GLSLGenerator::OutputEntryCaller(HLSLFunction* entryFunction)
     for(HLSLDeclaration *declaration : globalVarsAssignments)
     {
         m_writer.BeginLine(1, declaration->fileName, declaration->line);
+        if (declaration->type.array && !HasArrayConstructors())
+        {
+            OutputArrayElementAssignments(declaration);
+            m_writer.EndLine(";");
+            continue;
+        }
         OutputDeclarationBody( declaration->type, GetSafeIdentifierName( declaration->name ) );
 
         OutputDeclarationAssignment(declaration);
@@ -2100,18 +2325,36 @@ void GLSLGenerator::OutputDeclaration(HLSLDeclaration* declaration, const bool s
 	OutputDeclarationType( declaration->type );
 
 	HLSLDeclaration* lastDecl = nullptr;
+	bool lastDeclLoweredArray = false;
 	while( declaration )
 	{
-		if( lastDecl )
+		if( lastDeclLoweredArray )
+		{
+			// The element stores ended the declaration list, start a new one.
+			m_writer.Write( "; " );
+			OutputDeclarationType( declaration->type );
+		}
+		else if( lastDecl )
 			m_writer.Write( ", " );
 
-		OutputDeclarationBody( declaration->type, GetSafeIdentifierName( declaration->name ) );
+		bool lowerArrayInit = !HasArrayConstructors() && declaration->type.array && declaration->assignment != NULL;
+		if( lowerArrayInit && declaration->type.arraySize == NULL )
+		{
+			// There are no unsized arrays, take the size from the initializer.
+			m_writer.Write( "%s[%d]", GetSafeIdentifierName( declaration->name ), CountArrayElements( declaration ) );
+		}
+		else
+		{
+			OutputDeclarationBody( declaration->type, GetSafeIdentifierName( declaration->name ) );
+		}
 
+		lastDeclLoweredArray = false;
 		if( declaration->assignment != NULL )
 		{
             if (!skipAssignment)
             {
                 OutputDeclarationAssignment(declaration);
+                lastDeclLoweredArray = lowerArrayInit;
             }
             else
             {
@@ -2124,8 +2367,92 @@ void GLSLGenerator::OutputDeclaration(HLSLDeclaration* declaration, const bool s
 	}
 }
 
+static int GetComponentCount(const HLSLType& type)
+{
+    if (type.array || type.baseType < HLSLBaseType_FirstNumeric || type.baseType > HLSLBaseType_LastNumeric)
+    {
+        return 0;
+    }
+    const BaseTypeDescription& description = baseTypeDescriptions[type.baseType];
+    return description.numComponents * description.height;
+}
+
+static HLSLType GetArrayElementType(const HLSLType& arrayType)
+{
+    HLSLType elementType = arrayType;
+    elementType.array = false;
+    elementType.arraySize = NULL;
+    return elementType;
+}
+
+// HLSL allows flat initializer lists such as float4 a[2] = { 1, 2, 3, 4, 5, 6, 7, 8 }.
+// Returns the initializer after those that make up the array element starting at expression.
+static HLSLExpression* SkipArrayElementInitializer(HLSLExpression* expression, int elementComponents)
+{
+    int components = GetComponentCount(expression->expressionType);
+    expression = expression->nextExpression;
+    if (elementComponents == 0 || components == 0)
+    {
+        return expression;
+    }
+    while (expression != NULL && components < elementComponents)
+    {
+        components += GetComponentCount(expression->expressionType);
+        expression = expression->nextExpression;
+    }
+    return expression;
+}
+
+int GLSLGenerator::CountArrayElements(HLSLDeclaration* declaration)
+{
+    int const elementComponents = GetComponentCount(GetArrayElementType(declaration->type));
+    int count = 0;
+    for (HLSLExpression* expression = declaration->assignment; expression != NULL;
+         expression = SkipArrayElementInitializer(expression, elementComponents))
+    {
+        ++count;
+    }
+    return count;
+}
+
+void GLSLGenerator::OutputArrayElementAssignments(HLSLDeclaration* declaration)
+{
+    HLSLType const elementType = GetArrayElementType(declaration->type);
+    int const elementComponents = GetComponentCount(elementType);
+
+    int index = 0;
+    HLSLExpression* expression = declaration->assignment;
+    while (expression != NULL)
+    {
+        HLSLExpression* next = SkipArrayElementInitializer(expression, elementComponents);
+        m_writer.Write("%s%s[%d] = ", index > 0 ? "; " : "", GetSafeIdentifierName(declaration->name), index);
+        if (expression->nextExpression == next)
+        {
+            OutputExpression(expression, &elementType);
+        }
+        else
+        {
+            m_writer.Write("%s(", GetTypeName(elementType));
+            for (; expression != next; expression = expression->nextExpression)
+            {
+                OutputExpression(expression);
+                m_writer.Write(expression->nextExpression != next ? ", " : ")");
+            }
+        }
+        expression = next;
+        ++index;
+    }
+}
+
 void GLSLGenerator::OutputDeclarationAssignment(HLSLDeclaration* declaration)
 {
+   if( declaration->type.array && !HasArrayConstructors() )
+   {
+       // No array constructors or initializers: declare first, then store each element.
+       m_writer.Write( "; " );
+       OutputArrayElementAssignments( declaration );
+       return;
+   }
    m_writer.Write( " = " );
    if( declaration->type.array )
    {
@@ -2330,7 +2657,11 @@ void GLSLGenerator::OutputMatrixCtors() {
         m_writer.Write( ") { return %s(", GetTypeName(HLSLType(ctor.matrixType)));
 
         const BaseTypeDescription& ctorTypeDesc = baseTypeDescriptions[ctor.matrixType];
-        std::vector<std::string> args(ctorTypeDesc.numComponents * ctorTypeDesc.height, "0");
+        // A padded non-square matrix has more (and longer) GLSL columns, the extra entries stay 0.
+        bool const padded = !HasNonSquareMatrices() && IsNonSquareMatrixType(ctor.matrixType);
+        int const columnLength = padded ? GetPaddedMatrixSize(HLSLType(ctor.matrixType)) : ctorTypeDesc.numComponents;
+        int const columnCount = padded ? columnLength : ctorTypeDesc.height;
+        std::vector<std::string> args(columnLength * columnCount, "0");
         int argNumIn = 0;
         int argNumOut = 0;
         for(HLSLBaseType argType : ctor.argumentTypes)
@@ -2340,7 +2671,7 @@ void GLSLGenerator::OutputMatrixCtors() {
 
             if (IsScalarType(argType))
             {
-                int index = (argNumOut % ctorTypeDesc.height) * (ctorTypeDesc.numComponents) +
+                int index = (argNumOut % ctorTypeDesc.height) * columnLength +
                             (argNumOut / ctorTypeDesc.height);
                 args[index] = arg;
                 argNumOut++;
@@ -2352,7 +2683,7 @@ void GLSLGenerator::OutputMatrixCtors() {
                 {
                     std::string argVect = arg + ".";
                     argVect += "xyzw"[dim];
-                    int index = (argNumOut % ctorTypeDesc.height) * (ctorTypeDesc.numComponents) +
+                    int index = (argNumOut % ctorTypeDesc.height) * columnLength +
                                 (argNumOut / ctorTypeDesc.height);
                     args[index] = argVect;
                     argNumOut++;

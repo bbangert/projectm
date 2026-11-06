@@ -6,6 +6,7 @@
 
 #include "Renderer/Sampler.hpp"
 
+#include <memory>
 #include <string>
 
 namespace libprojectM {
@@ -82,6 +83,25 @@ public:
     explicit Texture(std::string name, const void* data, GLenum target, int width, int height, int depth,
                      GLint internalFormat, GLenum format, GLenum type, bool isUserTexture);
 
+    /**
+     * @brief Creates a 2D texture holding a volume as a slice atlas, for GL versions without 3D textures.
+     *
+     * The atlas layout is M4::GLSLGenerator::Texture3DAtlas (see BuildVolumeAtlas()); preset shaders
+     * translated with GLSLGenerator::Flag_Texture3DAtlas sample it like a 3D texture. Width(), Height()
+     * and Depth() return the volume size, as texsize_* uniforms expect, and IsVolume() returns true.
+     * Bind() always samples the atlas with GL_CLAMP_TO_EDGE, keeping only the sampler's filter
+     * mode: the shader wraps the volume coordinates itself, and GL_REPEAT would make the
+     * non-power-of-two atlas incomplete on GLES 2 drivers without full NPOT support.
+     * @param name Name of the texture for referencing in Milkdrop shaders.
+     * @param volumeData The volume's 32-bit texels, x fastest, then y, then z.
+     * @param size Width, height and depth of the volume.
+     * @param internalFormat OpenGL internal format, e.g. GL_RGBA8.
+     * @param format OpenGL color format of the texels, e.g. GL_RGBA.
+     * @param type OpenGL component type of the texels, e.g. GL_UNSIGNED_BYTE.
+     */
+    static auto CreateVolumeAtlas(std::string name, const void* volumeData, int size,
+                                  GLint internalFormat, GLenum format, GLenum type) -> std::shared_ptr<Texture>;
+
     Texture(Texture&& other) = default;
     auto operator=(Texture&& other) -> Texture& = default;
 
@@ -91,7 +111,8 @@ public:
      * @brief Binds the texture to the given texture unit.
      * Also resets the last used counter to zero.
      * @param slot The texture unit to bind the texture to.
-     * @param sampler An optional sampler to bind in the same slot.
+     * @param sampler An optional sampler to bind in the same slot. For a volume atlas, only its
+     *                filter mode is used, see CreateVolumeAtlas().
      */
     void Bind(GLint slot, const Sampler::Ptr& sampler = nullptr) const;
 
@@ -144,6 +165,12 @@ public:
     auto IsUserTexture() const -> bool;
 
     /**
+     * @brief Returns if the texture is a volume, either a 3D texture or a slice atlas from CreateVolumeAtlas().
+     * @return true if shaders sample the texture as a sampler3D.
+     */
+    auto IsVolume() const -> bool;
+
+    /**
      * @brief Returns true if the texture is empty/unallocated.
      * @return true if the texture is not yet allocated (e.g. the ID 0), false if the object contains a valid texture.
      */
@@ -171,6 +198,10 @@ private:
     int m_depth{0};              //!< Texture depth in pixels. Only used for 3D textures.
     bool m_isUserTexture{false}; //!< true if it's a user texture, false if an internal one.
     bool m_owned{true};          //!< true if this class owns the texture and should delete it.
+    bool m_volumeAtlas{false};   //!< true if a 2D texture holds a volume as a slice atlas.
+
+    Sampler::Ptr m_atlasLinearSampler;  //!< GL_CLAMP_TO_EDGE/GL_LINEAR sampler for a volume atlas.
+    Sampler::Ptr m_atlasNearestSampler; //!< GL_CLAMP_TO_EDGE/GL_NEAREST sampler for a volume atlas.
 
     GLint m_internalFormat{}; //!< OpenGL internal format, e.g. GL_RGBA8
     GLenum m_format{};        //!< OpenGL color format, e.g. GL_RGBA

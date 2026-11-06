@@ -90,6 +90,8 @@ add_library(Renderer OBJECT
         VertexBufferUsage.hpp
         VertexIndexArray.cpp
         VertexIndexArray.hpp
+        VolumeAtlas.cpp
+        VolumeAtlas.hpp
         Platform/DynamicLibrary_win32.cpp
         Platform/DynamicLibrary_posix.cpp
         Platform/DynamicLibrary_emscripten.cpp
