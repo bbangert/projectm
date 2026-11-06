@@ -43,8 +43,9 @@ public:
 
     /**
      * @brief Makes the next RenderFrame() behave like the first one after Initialize().
-     * Used after a frame that rendered only part of the viewport, so data it left for the next
-     * frame is not used.
+     * Used after a frame that rendered only part of the viewport: the images it left for the next
+     * frame (feedback buffers, blur textures) are discarded or cleared. Needs the scissor test
+     * disabled. Binds the preset's framebuffers.
      */
     virtual void ResetFirstFrame()
     {

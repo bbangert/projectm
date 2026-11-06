@@ -27,6 +27,8 @@
 
 #include <Logging.hpp>
 
+#include <array>
+
 namespace libprojectM {
 namespace MilkdropPreset {
 
@@ -124,7 +126,20 @@ auto MilkdropPreset::LoadResult() const -> PresetLoadResult
 
 void MilkdropPreset::ResetFirstFrame()
 {
+    // Skips the motion vectors, which read the u/v map before the next warp writes all of it.
     m_isFirstFrame = true;
+
+    m_state.blurTexture.Reset();
+
+    // Blank like newly allocated buffers, for a preset that starts clean or without an initial image.
+    std::array<GLfloat, 4> clearColor{};
+    glGetFloatv(GL_COLOR_CLEAR_VALUE, clearColor.data());
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    m_framebuffer.BindDraw(m_previousFrameBuffer);
+    glClear(GL_COLOR_BUFFER_BIT);
+    m_framebuffer.BindDraw(m_currentFrameBuffer);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glClearColor(clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
 }
 
 void MilkdropPreset::RenderFrame(const libprojectM::Audio::FrameAudioData& audioData, const Renderer::RenderContext& renderContext)

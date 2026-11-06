@@ -12,7 +12,8 @@
  *   projectM-gles-smoke [--gbm <device>] [--size <w>x<h>] [--frames <n>] [--texture-path <dir>]
  *                       [--dump <prefix>] [--expect-failure <preset>] [--shader-cache-dir <dir>]
  *                       [--require-cached] [--expect-color <rrggbb>] [--expect-load-status <status>]
- *                       [--preset-list <file>] [--preload] [--hard-cut] <preset.milk>...
+ *                       [--preset-list <file>] [--preload] [--hard-cut] [--start-clean]
+ *                       <preset.milk>...
  *
  * --require-cached fails a preset unless all its shader stages came from the shader cache,
  * --expect-color checks that the last frame is that color, --expect-load-status checks the
@@ -24,7 +25,8 @@
  * are loaded with projectm_preload_preset_file() + projectm_activate_preloaded_preset(), timed
  * as preload_ms and activate_ms (load_ms is their sum). A failed preload or activation fails the
  * preset unless it is expected to fail, and the preload must leave the application's framebuffer
- * bindings, viewport and scissor state as they were. --hard-cut switches without blending.
+ * bindings, viewport, scissor state and clear color as they were. --hard-cut switches without
+ * blending, --start-clean enables projectm_set_preset_start_clean().
  *
  * On the ES 2 backend, PROJECTM_GLES2_NO_SAMPLER_OBJECTS=1 exercises the per-texture sampler state
  * fallback.
@@ -102,6 +104,7 @@ struct Options
     std::string expectLoadStatus;
     bool preload{false};
     bool hardCut{false};
+    bool startClean{false};
     std::vector<std::string> presets;
 };
 
@@ -220,7 +223,8 @@ void SwitchFailedCallback(const char* presetFilename, const char* message, void*
 }
 
 /**
- * Application GL state that preloading must not change: framebuffer bindings, viewport and scissor.
+ * Application GL state that preloading must not change: framebuffer bindings, viewport, scissor
+ * and clear color.
  */
 struct AppGLState
 {
@@ -229,6 +233,7 @@ struct AppGLState
     GLint viewport[4]{};
     GLint scissorBox[4]{};
     GLboolean scissorEnabled{};
+    GLfloat clearColor[4]{};
 
     static auto Current() -> AppGLState
     {
@@ -243,6 +248,7 @@ struct AppGLState
         glGetIntegerv(GL_VIEWPORT, state.viewport);
         glGetIntegerv(GL_SCISSOR_BOX, state.scissorBox);
         state.scissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
+        glGetFloatv(GL_COLOR_CLEAR_VALUE, state.clearColor);
         return state;
     }
 
@@ -251,7 +257,8 @@ struct AppGLState
         return drawFramebuffer == other.drawFramebuffer && readFramebuffer == other.readFramebuffer &&
                std::equal(viewport, viewport + 4, other.viewport) &&
                std::equal(scissorBox, scissorBox + 4, other.scissorBox) &&
-               scissorEnabled == other.scissorEnabled;
+               scissorEnabled == other.scissorEnabled &&
+               std::equal(clearColor, clearColor + 4, other.clearColor);
     }
 };
 
@@ -350,6 +357,10 @@ auto ParseOptions(int argc, char** argv, Options& options) -> bool
         {
             options.hardCut = true;
         }
+        else if (arg == "--start-clean")
+        {
+            options.startClean = true;
+        }
         else if (arg == "--preset-list")
         {
             const char* listFile = next();
@@ -399,7 +410,8 @@ int main(int argc, char** argv)
     {
         std::fprintf(stderr, "usage: %s [--gbm <device>] [--size WxH] [--frames N] [--texture-path DIR] "
                              "[--dump PREFIX] [--expect-failure PRESET] [--shader-cache-dir DIR] [--require-cached] "
-                             "[--expect-color RRGGBB] [--expect-load-status STATUS[:STAGE]] [--preset-list FILE] [--preload] [--hard-cut] preset.milk...\n",
+                             "[--expect-color RRGGBB] [--expect-load-status STATUS[:STAGE]] [--preset-list FILE] [--preload] [--hard-cut] "
+                             "[--start-clean] preset.milk...\n",
                      argv[0]);
         return 2;
     }
@@ -548,6 +560,7 @@ int main(int argc, char** argv)
     projectm_set_window_size(projectM, static_cast<size_t>(options.width), static_cast<size_t>(options.height));
     projectm_set_mesh_size(projectM, 48, 36);
     projectm_set_preset_locked(projectM, true);
+    projectm_set_preset_start_clean(projectM, options.startClean);
     projectm_set_soft_cut_duration(projectM, 0.5);
     projectm_set_preset_switch_failed_event_callback(projectM, &SwitchFailedCallback, nullptr);
     projectm_set_preset_load_result_event_callback(projectM, &LoadResultCallback, nullptr);
@@ -586,7 +599,9 @@ int main(int argc, char** argv)
             glBindFramebuffer(GL_READ_FRAMEBUFFER, readProbeFramebuffer);
 #endif
             glViewport(3, 5, options.width / 2, options.height / 2);
+            glEnable(GL_SCISSOR_TEST);
             glScissor(7, 11, 13, 17);
+            glClearColor(0.25f, 0.5f, 0.75f, 1.0f);
             const AppGLState appState = AppGLState::Current();
 
             const auto preloadStatus = projectm_preload_preset_file(projectM, result.preset.c_str());
@@ -595,7 +610,9 @@ int main(int argc, char** argv)
 
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
             glViewport(0, 0, options.width, options.height);
+            glDisable(GL_SCISSOR_TEST);
             glScissor(0, 0, options.width, options.height);
+            glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 
             const auto activateStart = std::chrono::steady_clock::now();
             result.activateFailed = !projectm_activate_preloaded_preset(projectM, smooth);

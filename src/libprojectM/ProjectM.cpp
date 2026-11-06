@@ -93,30 +93,32 @@ private:
 };
 
 /**
- * @brief Clips drawing to the bottom left pixel, and restores the scissor state when destroyed.
+ * @brief Saves the scissor test state and box, and restores them when destroyed.
  */
-class OnePixelScissorGuard
+class ScissorStateGuard
 {
 public:
-    OnePixelScissorGuard()
+    ScissorStateGuard()
         : m_scissorEnabled(glIsEnabled(GL_SCISSOR_TEST))
     {
         glGetIntegerv(GL_SCISSOR_BOX, m_scissorBox.data());
-        glEnable(GL_SCISSOR_TEST);
-        glScissor(0, 0, 1, 1);
     }
 
-    ~OnePixelScissorGuard()
+    ~ScissorStateGuard()
     {
         glScissor(m_scissorBox[0], m_scissorBox[1], m_scissorBox[2], m_scissorBox[3]);
-        if (!m_scissorEnabled)
+        if (m_scissorEnabled)
+        {
+            glEnable(GL_SCISSOR_TEST);
+        }
+        else
         {
             glDisable(GL_SCISSOR_TEST);
         }
     }
 
-    OnePixelScissorGuard(const OnePixelScissorGuard&) = delete;
-    auto operator=(const OnePixelScissorGuard&) -> OnePixelScissorGuard& = delete;
+    ScissorStateGuard(const ScissorStateGuard&) = delete;
+    auto operator=(const ScissorStateGuard&) -> ScissorStateGuard& = delete;
 
 private:
     GLboolean m_scissorEnabled{};
@@ -239,14 +241,15 @@ void ProjectM::WarmUpPreset(Preset& preset)
 
     // One frame clipped to a single pixel: drivers that compile shader variants on the first draw
     // (e.g. Mesa vc4) do it now, at almost no fill cost. The frame's CPU work (expression
-    // evaluation) is not saved. It changes one pixel of the preset's own buffers, which
-    // activation overwrites with the initial image unless presets start clean.
-    {
-        OnePixelScissorGuard scissor;
-        preset.RenderFrame(m_audioStorage.GetFrameAudioData(), GetRenderContext());
-    }
+    // evaluation) is not saved.
+    ScissorStateGuard scissorState;
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(0, 0, 1, 1);
+    preset.RenderFrame(m_audioStorage.GetFrameAudioData(), GetRenderContext());
 
-    // Data the clipped frame left for the next one, e.g. the motion vector u/v map, is incomplete.
+    // The clipped frame left mostly unwritten images (feedback buffers, blur textures, motion
+    // vector u/v map) for the next one, which must start like a freshly loaded preset.
+    glDisable(GL_SCISSOR_TEST);
     preset.ResetFirstFrame();
 
     glFlush();

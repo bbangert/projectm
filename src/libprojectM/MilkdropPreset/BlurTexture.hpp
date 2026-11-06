@@ -72,6 +72,11 @@ public:
     auto GetDescriptorsForBlurLevel(BlurLevel blurLevel) const -> std::vector<Renderer::TextureSamplerDescriptor>;
 
     /**
+     * @brief Releases the blur textures, so they are sampled as before the first Update().
+     */
+    void Reset();
+
+    /**
      * @brief Renders the required blur passes on the given texture.
      * @param sourceTexture The texture to create the blur levels from.
      * @param perFrameContext The per-frame variables.

@@ -100,6 +100,15 @@ if(BUILD_TESTING)
             )
     set_tests_properties(projectM-gles-smoke-preload PROPERTIES ENVIRONMENT "${_smoke_environment}")
 
+    add_test(NAME projectM-gles-smoke-preload-first-frame
+            COMMAND ${CMAKE_COMMAND}
+            -DSMOKE=$<TARGET_FILE:projectM-gles-smoke>
+            -DPRESET=${PROJECTM_SOURCE_DIR}/presets/tests/273-blur-history.milk
+            -DOUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/preload-first-frame
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/ComparePreloadFirstFrame.cmake
+            )
+    set_tests_properties(projectM-gles-smoke-preload-first-frame PROPERTIES ENVIRONMENT "${_smoke_environment}")
+
     if(USE_GLES2)
         # The per-texture sampler state fallback must render like sampler objects, also for a
         # texture sampled with several wrap/filter modes in one draw.

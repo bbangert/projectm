@@ -35,7 +35,12 @@ BlurTexture::BlurTexture()
 
     m_blurMesh.Update();
 
-    // Initialize with empty textures.
+    Reset();
+}
+
+void BlurTexture::Reset()
+{
+    // Empty textures until the first Update() allocates them.
     for (size_t i = 0; i < m_blurTextures.size(); i++)
     {
         std::string textureName;
@@ -46,6 +51,9 @@ BlurTexture::BlurTexture()
 
         m_blurTextures[i] = std::make_shared<Renderer::Texture>(textureName, 0, GL_TEXTURE_2D, 0, 0, false);
     }
+
+    m_sourceTextureWidth = 0;
+    m_sourceTextureHeight = 0;
 }
 
 void BlurTexture::Initialize(const Renderer::RenderContext& renderContext)
