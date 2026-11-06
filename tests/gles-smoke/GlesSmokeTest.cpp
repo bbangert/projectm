@@ -22,7 +22,9 @@
  * Per preset, load_ms is the time of the load call and first_ms the time of the first frame
  * after it (the GLSL backend compile usually happens on the first draw). With --preload, presets
  * are loaded with projectm_preload_preset_file() + projectm_activate_preloaded_preset(), timed
- * as preload_ms and activate_ms (load_ms is their sum). --hard-cut switches without blending.
+ * as preload_ms and activate_ms (load_ms is their sum). A failed preload or activation fails the
+ * preset unless it is expected to fail, and the preload must leave the application's framebuffer
+ * bindings, viewport and scissor state as they were. --hard-cut switches without blending.
  *
  * On the ES 2 backend, PROJECTM_GLES2_NO_SAMPLER_OBJECTS=1 exercises the per-texture sampler state
  * fallback.
@@ -62,6 +64,18 @@
 #endif
 #ifndef EGL_PLATFORM_GBM_KHR
 #define EGL_PLATFORM_GBM_KHR 0x31D7
+#endif
+#ifndef GL_READ_FRAMEBUFFER
+#define GL_READ_FRAMEBUFFER 0x8CA8
+#endif
+#ifndef GL_DRAW_FRAMEBUFFER
+#define GL_DRAW_FRAMEBUFFER 0x8CA9
+#endif
+#ifndef GL_DRAW_FRAMEBUFFER_BINDING
+#define GL_DRAW_FRAMEBUFFER_BINDING 0x8CA6
+#endif
+#ifndef GL_READ_FRAMEBUFFER_BINDING
+#define GL_READ_FRAMEBUFFER_BINDING 0x8CAA
 #endif
 
 namespace {
@@ -115,6 +129,9 @@ struct PresetResult
     double preloadMs{};
     double activateMs{};
     double firstFrameMs{};
+    bool preloadFailed{false};
+    bool activateFailed{false};
+    bool glStateChanged{false};
     LoadResult load;
     double colorMatchFraction{};
 };
@@ -201,6 +218,42 @@ void SwitchFailedCallback(const char* presetFilename, const char* message, void*
     g_switchFailures.emplace_back(presetFilename ? presetFilename : "");
     g_lastSwitchFailureMessage = message ? message : "";
 }
+
+/**
+ * Application GL state that preloading must not change: framebuffer bindings, viewport and scissor.
+ */
+struct AppGLState
+{
+    GLint drawFramebuffer{};
+    GLint readFramebuffer{};
+    GLint viewport[4]{};
+    GLint scissorBox[4]{};
+    GLboolean scissorEnabled{};
+
+    static auto Current() -> AppGLState
+    {
+        AppGLState state;
+#ifdef PROJECTM_SMOKE_GLES2
+        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &state.drawFramebuffer);
+        state.readFramebuffer = state.drawFramebuffer;
+#else
+        glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &state.drawFramebuffer);
+        glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &state.readFramebuffer);
+#endif
+        glGetIntegerv(GL_VIEWPORT, state.viewport);
+        glGetIntegerv(GL_SCISSOR_BOX, state.scissorBox);
+        state.scissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
+        return state;
+    }
+
+    auto operator==(const AppGLState& other) const -> bool
+    {
+        return drawFramebuffer == other.drawFramebuffer && readFramebuffer == other.readFramebuffer &&
+               std::equal(viewport, viewport + 4, other.viewport) &&
+               std::equal(scissorBox, scissorBox + 4, other.scissorBox) &&
+               scissorEnabled == other.scissorEnabled;
+    }
+};
 
 void* LoadProc(const char* name, void*)
 {
@@ -472,6 +525,13 @@ int main(int argc, char** argv)
     }
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
+    // Bound for reading during preloads on ES 3, so restoring the read and draw bindings is checked
+    // separately.
+    GLuint readProbeFramebuffer{};
+    glGenFramebuffers(1, &readProbeFramebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, readProbeFramebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
     projectm_set_log_callback(&LogCallback, false, nullptr);
     projectm_set_log_level(PROJECTM_LOG_LEVEL_INFO, false);
 
@@ -518,9 +578,27 @@ int main(int argc, char** argv)
         const auto loadStart = std::chrono::steady_clock::now();
         if (options.preload)
         {
-            projectm_preload_preset_file(projectM, result.preset.c_str());
+            // An application framebuffer and viewport, as when preloading between frames.
+#ifdef PROJECTM_SMOKE_GLES2
+            glBindFramebuffer(GL_FRAMEBUFFER, targetFramebuffer);
+#else
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, targetFramebuffer);
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, readProbeFramebuffer);
+#endif
+            glViewport(3, 5, options.width / 2, options.height / 2);
+            glScissor(7, 11, 13, 17);
+            const AppGLState appState = AppGLState::Current();
+
+            const auto preloadStatus = projectm_preload_preset_file(projectM, result.preset.c_str());
+            result.preloadFailed = preloadStatus == PROJECTM_PRESET_LOAD_OTHER_ERROR;
+            result.glStateChanged = !(AppGLState::Current() == appState);
+
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glViewport(0, 0, options.width, options.height);
+            glScissor(0, 0, options.width, options.height);
+
             const auto activateStart = std::chrono::steady_clock::now();
-            projectm_activate_preloaded_preset(projectM, smooth);
+            result.activateFailed = !projectm_activate_preloaded_preset(projectM, smooth);
             const auto activateEnd = std::chrono::steady_clock::now();
             result.preloadMs = std::chrono::duration<double, std::milli>(activateStart - loadStart).count();
             result.activateMs = std::chrono::duration<double, std::milli>(activateEnd - activateStart).count();
@@ -610,8 +688,12 @@ int main(int argc, char** argv)
 
         const std::string baseName = result.preset.substr(result.preset.find_last_of('/') + 1);
         const bool expectFailure = options.expectFailure.count(baseName) > 0;
-        bool ok = result.glErrors == 0 && result.switchFailed == expectFailure;
-        if (!result.switchFailed)
+        bool ok = result.glErrors == 0 && result.switchFailed == expectFailure && !result.glStateChanged;
+        if (options.preload)
+        {
+            ok = ok && result.preloadFailed == expectFailure && result.activateFailed == expectFailure;
+        }
+        if (!result.switchFailed && !result.activateFailed)
         {
             ok = ok && (options.expectColor ? result.colorMatchFraction > 0.99 : result.nonBlackFraction > 0.001);
         }
@@ -627,10 +709,12 @@ int main(int argc, char** argv)
         }
         success = success && ok;
 
-        char preloadTimes[64] = "";
+        char preloadTimes[128] = "";
         if (options.preload)
         {
-            std::snprintf(preloadTimes, sizeof(preloadTimes), " preload_ms=%.1f activate_ms=%.1f", result.preloadMs, result.activateMs);
+            std::snprintf(preloadTimes, sizeof(preloadTimes), " preload_ms=%.1f activate_ms=%.1f%s%s%s", result.preloadMs, result.activateMs,
+                          result.preloadFailed ? " preload_failed" : "", result.activateFailed ? " activate_failed" : "",
+                          result.glStateChanged ? " gl_state_changed" : "");
         }
         std::printf("%s %s: frames=%d load_ms=%.1f%s first_ms=%.1f mean=%.2f ms max=%.2f ms gl_errors=%u non_black=%.1f%% mean_luma=%.1f "
                     "load=%s stages=%u cached=%u%s%s\n",
@@ -647,6 +731,7 @@ int main(int argc, char** argv)
 
     projectm_destroy(projectM);
 
+    glDeleteFramebuffers(1, &readProbeFramebuffer);
     glDeleteFramebuffers(1, &targetFramebuffer);
     glDeleteTextures(1, &targetTexture);
     eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
