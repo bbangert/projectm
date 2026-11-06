@@ -1,7 +1,14 @@
-set(SPRITE_SHADER_FILES
-        Shaders/MilkdropSpriteFragmentGlsl330.frag
-        Shaders/MilkdropSpriteVertexGlsl330.vert
-        )
+if(USE_GLES2)
+    set(SPRITE_SHADER_FILES
+            Shaders/MilkdropSpriteFragmentGlsl100.frag
+            Shaders/MilkdropSpriteVertexGlsl100.vert
+            )
+else()
+    set(SPRITE_SHADER_FILES
+            Shaders/MilkdropSpriteFragmentGlsl330.frag
+            Shaders/MilkdropSpriteVertexGlsl330.vert
+            )
+endif()
 
 include(GenerateShaderResources)
 generate_shader_resources(${CMAKE_CURRENT_BINARY_DIR}/SpriteShaders.hpp

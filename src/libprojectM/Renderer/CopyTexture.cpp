@@ -1,14 +1,21 @@
 #include "Renderer/CopyTexture.hpp"
 
+#ifdef USE_GLES2
+#include "CopyTextureShaders.hpp"
+#endif
+
 namespace libprojectM {
 namespace Renderer {
 
-#ifdef USE_GLES
+#if defined(USE_GLES2)
+static constexpr char ShaderVersion[] = "#version 100\n\n";
+#elif defined(USE_GLES)
 static constexpr char ShaderVersion[] = "#version 300 es\n\n";
 #else
 static constexpr char ShaderVersion[] = "#version 330\n\n";
 #endif
 
+#ifndef USE_GLES2
 static constexpr char CopyTextureVertexShader[] = R"(
 precision mediump float;
 
@@ -39,6 +46,7 @@ void main(){
 }
 
 )";
+#endif
 
 CopyTexture::CopyTexture()
     : m_mesh(VertexBufferUsage::StaticDraw, false, true)
@@ -312,8 +320,13 @@ std::shared_ptr<Shader> CopyTexture::BindShader(ShaderCache& shaderCache)
     {
         std::string vertexShader(ShaderVersion);
         std::string fragmentShader(ShaderVersion);
+#ifdef USE_GLES2
+        vertexShader.append(kCopyTextureVertexShaderGlsl100);
+        fragmentShader.append(kCopyTextureFragmentShaderGlsl100);
+#else
         vertexShader.append(CopyTextureVertexShader);
         fragmentShader.append(CopyTextureFragmentShader);
+#endif
 
         shader = std::make_shared<Shader>();
         shader->CompileProgram(vertexShader, fragmentShader);

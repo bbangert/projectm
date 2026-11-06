@@ -84,6 +84,20 @@ void TextureAttachment::ReplaceTexture(int width, int height)
                 pixelFormat = m_type;
             }
             break;
+#ifdef USE_GLES2
+        // Unsized formats as in GL_OES_depth_texture / GL_OES_packed_depth_stencil. GLES 2 has no
+        // stencil-only textures.
+        case AttachmentType::Depth:
+            internalFormat = GL_DEPTH_COMPONENT;
+            textureFormat = GL_DEPTH_COMPONENT;
+            pixelFormat = GL_UNSIGNED_SHORT;
+            break;
+        case AttachmentType::DepthStencil:
+            internalFormat = GL_DEPTH_STENCIL;
+            textureFormat = GL_DEPTH_STENCIL;
+            pixelFormat = GL_UNSIGNED_INT_24_8;
+            break;
+#else
         case AttachmentType::Depth:
             internalFormat = GL_DEPTH_COMPONENT16;
             textureFormat = GL_DEPTH_COMPONENT;
@@ -99,6 +113,7 @@ void TextureAttachment::ReplaceTexture(int width, int height)
             textureFormat = GL_DEPTH_STENCIL;
             pixelFormat = GL_UNSIGNED_INT_24_8;
             break;
+#endif
 
         default:
             return;

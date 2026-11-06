@@ -65,7 +65,10 @@ void MilkdropPreset::Initialize(const Renderer::RenderContext& renderContext)
 
     // Update framebuffer and texture sizes if needed
     m_framebuffer.SetSize(renderContext.viewportSizeX, renderContext.viewportSizeY);
-    m_motionVectorUVMap->SetSize(renderContext.viewportSizeX, renderContext.viewportSizeY);
+    if (m_motionVectorUVMap)
+    {
+        m_motionVectorUVMap->SetSize(renderContext.viewportSizeX, renderContext.viewportSizeY);
+    }
     if (m_state.mainTexture.expired())
     {
         m_state.mainTexture = m_framebuffer.GetColorAttachmentTexture(1, 0);
@@ -83,7 +86,10 @@ void MilkdropPreset::RenderFrame(const libprojectM::Audio::FrameAudioData& audio
     // Update framebuffer and u/v texture size if needed
     if (m_framebuffer.SetSize(renderContext.viewportSizeX, renderContext.viewportSizeY))
     {
-        m_motionVectorUVMap->SetSize(renderContext.viewportSizeX, renderContext.viewportSizeY);
+        if (m_motionVectorUVMap)
+        {
+            m_motionVectorUVMap->SetSize(renderContext.viewportSizeX, renderContext.viewportSizeY);
+        }
         m_isFirstFrame = true;
     }
 
@@ -99,7 +105,7 @@ void MilkdropPreset::RenderFrame(const libprojectM::Audio::FrameAudioData& audio
     // Only do it after drawing one frame after init or resize.
     if (!m_isFirstFrame)
     {
-        m_motionVectors.Draw(m_perFrameContext, m_motionVectorUVMap->Texture());
+        m_motionVectors.Draw(m_perFrameContext, m_motionVectorUVMap ? m_motionVectorUVMap->Texture() : nullptr);
     }
 
     // y-flip the previous frame and assign the flipped texture as "main"
@@ -109,14 +115,20 @@ void MilkdropPreset::RenderFrame(const libprojectM::Audio::FrameAudioData& audio
     // We now draw to the current framebuffer.
     m_framebuffer.Bind(m_currentFrameBuffer);
 
-    // Add motion vector u/v texture for the warp mesh draw and clean both buffers.
-    m_framebuffer.SetAttachment(m_currentFrameBuffer, 1, m_motionVectorUVMap);
+    if (m_motionVectorUVMap)
+    {
+        // Add motion vector u/v texture for the warp mesh draw and clean both buffers.
+        m_framebuffer.SetAttachment(m_currentFrameBuffer, 1, m_motionVectorUVMap);
+    }
 
     // Draw previous frame image warped via per-pixel mesh and warp shader
     m_perPixelMesh.Draw(m_state, m_perFrameContext, m_perPixelContext);
 
-    // Remove the u/v texture from the framebuffer.
-    m_framebuffer.RemoveColorAttachment(m_currentFrameBuffer, 1);
+    if (m_motionVectorUVMap)
+    {
+        // Remove the u/v texture from the framebuffer.
+        m_framebuffer.RemoveColorAttachment(m_currentFrameBuffer, 1);
+    }
 
     // Update blur textures
     {
@@ -238,7 +250,10 @@ void MilkdropPreset::Load(std::istream& stream)
 void MilkdropPreset::InitializePreset(PresetFileParser& parsedFile)
 {
     // Create the offscreen rendering surfaces.
+#ifndef USE_GLES2
+    // GLES 2 has neither float render targets nor a second color output for the u/v map.
     m_motionVectorUVMap = std::make_shared<Renderer::TextureAttachment>(GL_RG16F, GL_RG, GL_FLOAT, 0, 0);
+#endif
     m_framebuffer.CreateColorAttachment(0, 0); // Main image 1
     m_framebuffer.CreateColorAttachment(1, 0); // Main image 2
 

@@ -48,16 +48,25 @@ void MilkdropSprite::Init(const std::string& spriteData, const Renderer::RenderC
     if (!spriteShader)
     {
         // ToDo: Better handle this in the shader class to reduce duplicate code.
-#ifdef USE_GLES
+#if defined(USE_GLES2)
+        // GLSL ES 1.00; the shader files declare their own precision.
+        constexpr char versionHeader[] = "#version 100\n\n";
+        const std::string& vertexShader = kMilkdropSpriteVertexGlsl100;
+        const std::string& fragmentShader = kMilkdropSpriteFragmentGlsl100;
+#elif defined(USE_GLES)
         // GLES also requires a precision specifier for variables and 3D samplers
         constexpr char versionHeader[] = "#version 300 es\n\nprecision mediump float;\nprecision mediump sampler3D;\n";
+        const std::string& vertexShader = kMilkdropSpriteVertexGlsl330;
+        const std::string& fragmentShader = kMilkdropSpriteFragmentGlsl330;
 #else
         constexpr char versionHeader[] = "#version 330\n\n";
+        const std::string& vertexShader = kMilkdropSpriteVertexGlsl330;
+        const std::string& fragmentShader = kMilkdropSpriteFragmentGlsl330;
 #endif
 
         spriteShader = std::make_shared<Renderer::Shader>();
-        spriteShader->CompileProgram(static_cast<const char*>(versionHeader) + kMilkdropSpriteVertexGlsl330,
-                                     static_cast<const char*>(versionHeader) + kMilkdropSpriteFragmentGlsl330);
+        spriteShader->CompileProgram(static_cast<const char*>(versionHeader) + vertexShader,
+                                     static_cast<const char*>(versionHeader) + fragmentShader);
         renderContext.shaderCache->Insert("milkdrop_user_sprite", spriteShader);
     }
 
@@ -276,7 +285,11 @@ void MilkdropSprite::Draw(const Audio::FrameAudioData& audioData,
         }
 
         // Reset to original FBO
+#ifdef USE_GLES2
+        glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(outputFramebufferObject));
+#else
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(outputFramebufferObject));
+#endif
     }
 
     m_texture->Unbind(0);

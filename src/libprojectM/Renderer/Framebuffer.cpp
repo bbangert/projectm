@@ -3,6 +3,13 @@
 namespace libprojectM {
 namespace Renderer {
 
+#ifdef USE_GLES2
+// GLES 2 has a single framebuffer binding point that is used for both drawing and reading.
+static constexpr GLenum DrawFramebufferTarget = GL_FRAMEBUFFER;
+#else
+static constexpr GLenum DrawFramebufferTarget = GL_DRAW_FRAMEBUFFER;
+#endif
+
 Framebuffer::Framebuffer()
 {
     m_framebufferIds.resize(1);
@@ -56,7 +63,11 @@ void Framebuffer::BindRead(int framebufferIndex)
         return;
     }
 
+#ifndef USE_GLES2
+    // On GLES 2, reads come from the framebuffer bound with Bind() or BindDraw(). Binding the read
+    // framebuffer here would also change the draw target, so only the index is recorded.
     glBindFramebuffer(GL_READ_FRAMEBUFFER, m_framebufferIds.at(framebufferIndex));
+#endif
 
     m_readFramebuffer = framebufferIndex;
 }
@@ -68,14 +79,14 @@ void Framebuffer::BindDraw(int framebufferIndex)
         return;
     }
 
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_framebufferIds.at(framebufferIndex));
+    glBindFramebuffer(DrawFramebufferTarget, m_framebufferIds.at(framebufferIndex));
 
     m_drawFramebuffer = framebufferIndex;
 }
 
 void Framebuffer::Unbind()
 {
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glBindFramebuffer(DrawFramebufferTarget, 0);
 }
 
 bool Framebuffer::SetSize(int width, int height)
@@ -187,9 +198,7 @@ void Framebuffer::SetAttachment(int framebufferIndex, int attachmentIndex, const
     }
     UpdateDrawBuffers(framebufferIndex);
 
-    // Reset to previous read/draw buffers
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, m_framebufferIds.at(m_readFramebuffer));
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_framebufferIds.at(m_drawFramebuffer));
+    RestoreReadDrawFramebuffers();
 }
 
 void Framebuffer::CreateColorAttachment(int framebufferIndex, int attachmentIndex)
@@ -318,6 +327,7 @@ void Framebuffer::MaskDrawBuffer(int bufferIndex, bool masked)
     // Invert the flag, as "true" means the color channel *will* be written.
     auto glMasked = static_cast<GLboolean>(!masked);
 #ifdef USE_GLES
+    static_cast<void>(bufferIndex);
     glColorMask(glMasked, glMasked, glMasked, glMasked);
 #else
     glColorMaski(bufferIndex, glMasked, glMasked, glMasked, glMasked);
@@ -326,6 +336,10 @@ void Framebuffer::MaskDrawBuffer(int bufferIndex, bool masked)
 
 void Framebuffer::UpdateDrawBuffers(int framebufferIndex)
 {
+#ifdef USE_GLES2
+    // GLES 2 renders to GL_COLOR_ATTACHMENT0 only and has no glDrawBuffers() without extensions.
+    static_cast<void>(framebufferIndex);
+#else
     if (framebufferIndex < 0 || framebufferIndex >= static_cast<int>(m_framebufferIds.size()))
     {
         return;
@@ -380,6 +394,7 @@ void Framebuffer::UpdateDrawBuffers(int framebufferIndex)
     }
 
     glDrawBuffers(static_cast<GLsizei>(buffers.size()), buffers.data());
+#endif
 }
 
 void Framebuffer::RemoveAttachment(int framebufferIndex, GLenum attachmentType)
@@ -396,9 +411,17 @@ void Framebuffer::RemoveAttachment(int framebufferIndex, GLenum attachmentType)
 
     m_attachments.at(framebufferIndex).erase(attachmentType);
 
-    // Reset to previous read/draw buffers
+    RestoreReadDrawFramebuffers();
+}
+
+void Framebuffer::RestoreReadDrawFramebuffers()
+{
+#ifdef USE_GLES2
+    glBindFramebuffer(GL_FRAMEBUFFER, m_framebufferIds.at(m_drawFramebuffer));
+#else
     glBindFramebuffer(GL_READ_FRAMEBUFFER, m_framebufferIds.at(m_readFramebuffer));
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_framebufferIds.at(m_drawFramebuffer));
+#endif
 }
 
 } // namespace Renderer

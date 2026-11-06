@@ -70,6 +70,11 @@ protected:
     static auto GetPreferredInternalFormat() -> int;
 
     /**
+     * @return GL_RGBA8, or GL_RGBA with USE_GLES2 (GLES 2 has no sized internal formats).
+     */
+    static auto GetSizedInternalFormat() -> int;
+
+    /**
      * @brief Milkdrop 2D noise algorithm
      *
      * Creates a different, smoothed noise texture in each of the four color channels.

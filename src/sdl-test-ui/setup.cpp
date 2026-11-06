@@ -92,7 +92,12 @@ void seedRand() {
 }
 
 void initGL() {
-#ifdef USE_GLES
+#if defined(USE_GLES2)
+    // The ES 2 backend targets drivers without ES 3 (e.g. Mesa vc4).
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+#elif defined(USE_GLES)
     // use GLES 3.2
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);

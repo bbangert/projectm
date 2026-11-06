@@ -15,6 +15,36 @@ add_subdirectory(MilkdropPreset)
 add_subdirectory(Renderer)
 add_subdirectory(UserSprites)
 
+if(USE_GLES2)
+    # Validate the GLSL ES 1.00 static shaders on every build if glslang is installed.
+    find_program(GLSLANG_EXECUTABLE NAMES glslang glslangValidator)
+    if(GLSLANG_EXECUTABLE)
+        message(STATUS "Validating GLSL ES 1.00 static shaders with ${GLSLANG_EXECUTABLE}")
+        file(GLOB_RECURSE _glsl100_shader_files CONFIGURE_DEPENDS
+                "${CMAKE_CURRENT_SOURCE_DIR}/*Glsl100.vert"
+                "${CMAKE_CURRENT_SOURCE_DIR}/*Glsl100.frag"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Renderer/TransitionShaders/*.frag"
+                )
+        set(_glsl100_stamp "${CMAKE_CURRENT_BINARY_DIR}/glsl-es100/validated.stamp")
+        add_custom_command(OUTPUT "${_glsl100_stamp}"
+                COMMAND ${CMAKE_COMMAND}
+                -D "GLSLANG=${GLSLANG_EXECUTABLE}"
+                -D "SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+                -D "OUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/glsl-es100"
+                -D "STAMP_FILE=${_glsl100_stamp}"
+                -P "${PROJECTM_SOURCE_DIR}/cmake/ValidateStaticShadersGlsl100.cmake"
+                DEPENDS
+                ${_glsl100_shader_files}
+                "${PROJECTM_SOURCE_DIR}/cmake/ValidateStaticShadersGlsl100.cmake"
+                COMMENT "Validating GLSL ES 1.00 static shaders"
+                VERBATIM
+                )
+        add_custom_target(validate-glsl-es100 ALL DEPENDS "${_glsl100_stamp}")
+    else()
+        message(STATUS "glslang not found, GLSL ES 1.00 static shaders will not be validated at build time")
+    endif()
+endif()
+
 add_library(projectM_main OBJECT
         "${PROJECTM_EXPORT_HEADER}"
         Logging.cpp

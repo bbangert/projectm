@@ -3,10 +3,83 @@
 #include <Logging.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+#include <string>
 #include <vector>
 
 namespace libprojectM {
 namespace Renderer {
+
+#ifdef USE_GLES2
+namespace {
+
+/**
+ * GLSL ES 1.00 has no layout(location = N) qualifiers. The vertex attribute indices the meshes use
+ * (Mesh: 0-2, PerPixelMesh: 3-7, FinalComposite: 3) are bound by attribute name before linking.
+ */
+struct AttributeLocation
+{
+    const char* name;
+    GLuint location;
+};
+
+constexpr AttributeLocation AttributeLocations[] = {
+    {"vertex_position", 0},
+    {"position", 0},
+    {"iPosition", 0},
+    {"vertex_color", 1},
+    {"vertex_texture", 2},
+    {"tex_coord", 2},
+    {"vertex_rad_ang", 3},
+    {"rad_ang", 3},
+    {"transforms", 4},
+    {"warp_center", 5},
+    {"warp_distance", 6},
+    {"stretch", 7},
+};
+
+void BindAttributeLocations(GLuint program)
+{
+    for (const auto& attribute : AttributeLocations)
+    {
+        glBindAttribLocation(program, attribute.location, attribute.name);
+    }
+}
+
+/**
+ * Logs active attributes that have no fixed location, as they would get an arbitrary index.
+ */
+void CheckAttributeLocations(GLuint program)
+{
+    GLint attributeCount{};
+    GLint maxNameLength{};
+    glGetProgramiv(program, GL_ACTIVE_ATTRIBUTES, &attributeCount);
+    glGetProgramiv(program, GL_ACTIVE_ATTRIBUTE_MAX_LENGTH, &maxNameLength);
+    std::vector<char> name(static_cast<size_t>(maxNameLength) + 1);
+
+    for (GLint index = 0; index < attributeCount; index++)
+    {
+        GLint size{};
+        GLenum type{};
+        glGetActiveAttrib(program, static_cast<GLuint>(index), maxNameLength, nullptr, &size, &type, name.data());
+
+        bool known = false;
+        for (const auto& attribute : AttributeLocations)
+        {
+            if (std::string(attribute.name) == name.data())
+            {
+                known = true;
+                break;
+            }
+        }
+        if (!known)
+        {
+            LOG_WARN(std::string("[Shader] Vertex attribute \"") + name.data() + "\" has no fixed location in the GLES2 attribute table.");
+        }
+    }
+}
+
+} // namespace
+#endif
 
 Shader::Shader()
     : m_shaderProgram(glCreateProgram())
@@ -30,6 +103,10 @@ void Shader::CompileProgram(const std::string& vertexShaderSource,
     glAttachShader(m_shaderProgram, vertexShader);
     glAttachShader(m_shaderProgram, fragmentShader);
 
+#ifdef USE_GLES2
+    BindAttributeLocations(m_shaderProgram);
+#endif
+
     glLinkProgram(m_shaderProgram);
 
     // Shader objects are no longer needed after linking, free the memory.
@@ -42,6 +119,9 @@ void Shader::CompileProgram(const std::string& vertexShaderSource,
     glGetProgramiv(m_shaderProgram, GL_LINK_STATUS, &programLinked);
     if (programLinked == GL_TRUE)
     {
+#ifdef USE_GLES2
+        CheckAttributeLocations(m_shaderProgram);
+#endif
         return;
     }
 
@@ -176,7 +256,14 @@ void Shader::SetUniformMat3x4(const char* uniform, const glm::mat3x4& values) co
     {
         return;
     }
+#ifdef USE_GLES2
+    // GLES 2 has no non-square matrices. The uniform is declared mat4 there, holding the three
+    // columns of the mat3x4 and a zero fourth column.
+    const glm::mat4x4 padded(values[0], values[1], values[2], glm::vec4(0.0f));
+    glUniformMatrix4fv(location, 1, GL_FALSE, glm::value_ptr(padded));
+#else
     glUniformMatrix3x4fv(location, 1, GL_FALSE, glm::value_ptr(values));
+#endif
 }
 
 void Shader::SetUniformMat4x4(const char* uniform, const glm::mat4x4& values) const

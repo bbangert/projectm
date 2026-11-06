@@ -9,6 +9,10 @@
 #include <HLSLParser.h>
 #include <Logging.hpp>
 
+#ifdef USE_GLES2
+#include <Renderer/Platform/GladLoader.hpp>
+#endif
+
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/mat4x4.hpp>
 
@@ -150,7 +154,8 @@ void MilkdropShader::LoadTexturesAndCompile(PresetState& presetState)
     presetState.blurTexture.SetRequiredBlurLevel(m_maxBlurLevelRequired);
 }
 
-void MilkdropShader::LoadVariables(const PresetState& presetState, const PerFrameContext& perFrameContext)
+void MilkdropShader::LoadVariables(const PresetState& presetState, const PerFrameContext& perFrameContext,
+                                   const Renderer::Sampler* mainSamplerOverride)
 {
     // These are the inputs: http://www.geisswerks.com/milkdrop/milkdrop_preset_authoring.html#3f6
 
@@ -307,25 +312,91 @@ void MilkdropShader::LoadVariables(const PresetState& presetState, const PerFram
     }
 
     // Bind all texture and sampler descriptors. This includes the main and blur textures.
-    GLint textureUnit{0};
     for (auto& desc : m_mainTextureDescriptors)
     {
         // Update main texture, swaps every frame.
         desc.Texture(presetState.mainTexture);
-        desc.Bind(textureUnit, m_shader);
-        textureUnit++;
     }
-    presetState.blurTexture.Bind(textureUnit, m_shader);
     for (auto& desc : m_textureSamplerDescriptors)
     {
         if (desc.Empty())
         {
             desc.TryUpdate(*presetState.renderContext.textureManager);
         }
+    }
+
+#ifdef USE_GLES2
+    if (!Renderer::Platform::GladLoader::Instance().HasSamplerObjects())
+    {
+        BindTexturesWithoutSamplerObjects(presetState, mainSamplerOverride);
+        return;
+    }
+#else
+    static_cast<void>(mainSamplerOverride);
+#endif
+
+    GLint textureUnit{0};
+    for (auto& desc : m_mainTextureDescriptors)
+    {
+        desc.Bind(textureUnit, m_shader);
+        textureUnit++;
+    }
+    presetState.blurTexture.Bind(textureUnit, m_shader);
+    for (auto& desc : m_textureSamplerDescriptors)
+    {
         desc.Bind(textureUnit, m_shader);
         textureUnit++;
     }
 }
+
+#ifdef USE_GLES2
+void MilkdropShader::BindTexturesWithoutSamplerObjects(const PresetState& presetState, const Renderer::Sampler* mainSamplerOverride)
+{
+    // Resolve all textures first: making a copy draws, which unbinds the program and textures.
+    m_textureStateCopies.Begin();
+    auto& shaderCache = *presetState.renderContext.shaderCache;
+    const auto resolve = [this, &shaderCache](const Renderer::TextureSamplerDescriptor& desc, const Renderer::Sampler* sampler) {
+        if (desc.Empty() || sampler == nullptr)
+        {
+            return desc;
+        }
+        Renderer::TextureSamplerDescriptor resolved = desc;
+        resolved.Texture(m_textureStateCopies.Resolve(shaderCache, desc.Texture(), sampler->WrapMode(), sampler->FilterMode()));
+        return resolved;
+    };
+
+    std::vector<Renderer::TextureSamplerDescriptor> mainDescriptors;
+    mainDescriptors.reserve(m_mainTextureDescriptors.size());
+    for (const auto& desc : m_mainTextureDescriptors)
+    {
+        // The caller rebinds unit 0 with its own sampler, which then applies to the texture there.
+        const bool overridden = mainDescriptors.empty() && mainSamplerOverride != nullptr;
+        mainDescriptors.push_back(resolve(desc, overridden ? mainSamplerOverride : desc.Sampler().get()));
+    }
+
+    std::vector<Renderer::TextureSamplerDescriptor> otherDescriptors;
+    otherDescriptors.reserve(m_textureSamplerDescriptors.size());
+    for (const auto& desc : m_textureSamplerDescriptors)
+    {
+        otherDescriptors.push_back(resolve(desc, desc.Sampler().get()));
+    }
+
+    m_shader.Bind();
+
+    GLint textureUnit{0};
+    for (const auto& desc : mainDescriptors)
+    {
+        desc.Bind(textureUnit, m_shader);
+        textureUnit++;
+    }
+    presetState.blurTexture.Bind(textureUnit, m_shader);
+    for (const auto& desc : otherDescriptors)
+    {
+        desc.Bind(textureUnit, m_shader);
+        textureUnit++;
+    }
+}
+#endif
 
 auto MilkdropShader::Shader() -> Renderer::Shader&
 {
@@ -383,6 +454,15 @@ void MilkdropShader::PreprocessPresetShader(std::string& program)
     {
         if (m_type == ShaderType::WarpShader)
         {
+#ifdef USE_GLES2
+            // GLES 2 has a single color output, so the warp shader writes no motion vector u/v coords.
+            program.replace(int(found), 11, R"(
+void PS(float4 _vDiffuse : COLOR,
+        float4 _uv : TEXCOORD0,
+        float2 _rad_ang : TEXCOORD1,
+        out float4 _return_value : COLOR0)
+)");
+#else
             program.replace(int(found), 11, R"(
 void PS(float4 _vDiffuse : COLOR,
         float4 _uv : TEXCOORD0,
@@ -390,6 +470,7 @@ void PS(float4 _vDiffuse : COLOR,
         out float4 _return_value : COLOR0,
         out float4 _mv_tex_coords : COLOR1)
 )");
+#endif
         }
         else
         {
@@ -412,10 +493,12 @@ void PS(float4 _vDiffuse : COLOR,
     if (found != std::string::npos)
     {
         std::string progMain = "{\nfloat3 ret = 0;\n";
+#ifndef USE_GLES2
         if (m_type == ShaderType::WarpShader)
         {
             progMain.append("_mv_tex_coords.xy = _uv.xy;\n");
         }
+#endif
         program.replace(int(found), 1, progMain);
     }
     else
@@ -656,13 +739,13 @@ void MilkdropShader::TranspileHLSLShader(const PresetState& presetState, std::st
     }
 
     // Now insert them on top.
-    for (const auto& texSizeDeclaration : texSizeDeclarations)
+    for (const auto& texSizeDecl : texSizeDeclarations)
     {
-        sourcePreprocessed.insert(0, texSizeDeclaration);
+        sourcePreprocessed.insert(0, texSizeDecl);
     }
-    for (const auto& samplerDeclaration : samplerDeclarations)
+    for (const auto& samplerDecl : samplerDeclarations)
     {
-        sourcePreprocessed.insert(0, samplerDeclaration);
+        sourcePreprocessed.insert(0, samplerDecl);
     }
 
     // Transpile from HLSL (aka preset shader aka DirectX shader) to GLSL (aka OpenGL shader lang)

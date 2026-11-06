@@ -2,11 +2,13 @@
 
 #include "MilkdropStaticShaders.hpp"
 
+#include <Logging.hpp>
 #include <Renderer/BlendMode.hpp>
 #include <Renderer/ShaderCache.hpp>
 #include <Renderer/TextureManager.hpp>
 
 #include <algorithm>
+#include <atomic>
 
 namespace libprojectM {
 namespace MilkdropPreset {
@@ -25,6 +27,18 @@ void MotionVectors::Draw(const PerFrameContext& presetPerFrameContext, std::shar
     {
         return;
     }
+
+#ifdef USE_GLES2
+    // TODO(es2): GLES 2 has no float u/v render target to read the warp offsets back from. The line
+    // end points have to come from the warp mesh u/v deltas computed on the CPU.
+    static_cast<void>(motionTexture);
+    static std::atomic<bool> loggedUnsupported{false};
+    if (!loggedUnsupported.exchange(true))
+    {
+        LOG_WARN("[MotionVectors] Motion vectors are not implemented on OpenGL ES 2.0 yet and are not drawn.");
+    }
+    return;
+#endif
 
     int countX = static_cast<int>(*presetPerFrameContext.mv_x);
     int countY = static_cast<int>(*presetPerFrameContext.mv_y);

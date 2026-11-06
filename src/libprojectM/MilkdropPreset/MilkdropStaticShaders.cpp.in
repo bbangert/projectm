@@ -15,9 +15,15 @@ MilkdropStaticShaders::MilkdropStaticShaders(bool useGLES)
 {
     if (m_useGLES)
     {
+#ifdef USE_GLES2
+        // OpenGL ES 2.0 backend: GLSL ES 1.00 static shaders and translator target.
+        m_versionHeader = "#version 100";
+        m_GLSLGeneratorVersion = M4::GLSLGenerator::Version::Version_100_ES;
+#else
         // If GLES is enabled, use the embedded specification language variant.
         m_versionHeader = "#version 300 es";
         m_GLSLGeneratorVersion = M4::GLSLGenerator::Version::Version_300_ES;
+#endif
     }
     else
     {
@@ -31,16 +37,16 @@ std::string MilkdropStaticShaders::AddVersionHeader(std::string shader_text)
     return m_versionHeader + "\n" + shader_text;
 }
 
-#define DECLARE_SHADER_ACCESSOR(name)              \
-    std::string MilkdropStaticShaders::Get##name()       \
-    {                                              \
-        return AddVersionHeader(k##name##Glsl330); \
+#define DECLARE_SHADER_ACCESSOR(name, source)    \
+    std::string MilkdropStaticShaders::Get##name() \
+    {                                            \
+        return AddVersionHeader(source);         \
     }
 
-#define DECLARE_SHADER_ACCESSOR_NO_HEADER(name) \
-    std::string MilkdropStaticShaders::Get##name()    \
-    {                                           \
-        return k##name##Glsl330;                \
+#define DECLARE_SHADER_ACCESSOR_NO_HEADER(name, source) \
+    std::string MilkdropStaticShaders::Get##name()      \
+    {                                                 \
+        return source;                                \
     }
 
 @STATIC_SHADER_ACCESSOR_DEFINITIONS@

@@ -66,6 +66,8 @@ public:
 
     /**
      * @brief Binds the given index as the current read framebuffer.
+     * On GLES 2, which has no separate read binding, this only records the index. Reads then come
+     * from the framebuffer bound for drawing.
      * @param framebufferIndex The framebuffer index.
      */
     void BindRead(int framebufferIndex);
@@ -221,6 +223,11 @@ private:
      * @param framebufferIndex The framebuffer index.
      */
     void UpdateDrawBuffers(int framebufferIndex);
+
+    /**
+     * @brief Rebinds the read and draw framebuffers last bound via Bind(), BindRead() or BindDraw().
+     */
+    void RestoreReadDrawFramebuffers();
 
     /**
      * @brief Removes the given attachment type from the framebuffer.

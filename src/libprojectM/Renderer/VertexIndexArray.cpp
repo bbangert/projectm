@@ -1,5 +1,12 @@
 #include "Renderer/VertexIndexArray.hpp"
 
+#ifdef USE_GLES2
+#include <Logging.hpp>
+
+#include <atomic>
+#include <limits>
+#endif
+
 namespace libprojectM {
 namespace Renderer {
 
@@ -96,13 +103,36 @@ void VertexIndexArray::Update()
         return;
     }
 
+#ifdef USE_GLES2
+    m_uploadIndices.resize(m_indices.size());
+    bool overflow = false;
+    for (size_t index = 0; index < m_indices.size(); index++)
+    {
+        overflow = overflow || m_indices[index] > std::numeric_limits<uint16_t>::max();
+        m_uploadIndices[index] = static_cast<uint16_t>(m_indices[index]);
+    }
+    if (overflow)
+    {
+        static std::atomic<bool> loggedOverflow{false};
+        if (!loggedOverflow.exchange(true))
+        {
+            LOG_ERROR("[VertexIndexArray] Vertex index above 65535 can't be drawn with 16-bit indices on OpenGL ES 2.0. Reduce the mesh size.");
+        }
+    }
+    const void* data = m_uploadIndices.data();
+    const size_t dataSize = sizeof(uint16_t) * m_uploadIndices.size();
+#else
+    const void* data = m_indices.data();
+    const size_t dataSize = sizeof(uint32_t) * m_indices.size();
+#endif
+
     if (m_veabSize == m_indices.size())
     {
-        glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, static_cast<GLsizei>(sizeof(uint32_t) * m_indices.size()), m_indices.data());
+        glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, static_cast<GLsizei>(dataSize), data);
     }
     else
     {
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizei>(sizeof(uint32_t) * m_indices.size()), m_indices.data(), VertexBufferUsageToGL(m_vboUsage));
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizei>(dataSize), data, VertexBufferUsageToGL(m_vboUsage));
         m_veabSize = m_indices.size();
     }
 }

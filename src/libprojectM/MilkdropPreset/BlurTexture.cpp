@@ -146,8 +146,13 @@ void BlurTexture::Update(const Renderer::Texture& sourceTexture, const PerFrameC
     // Remember previously bound framebuffer
     GLint origReadFramebuffer;
     GLint origDrawFramebuffer;
+#ifdef USE_GLES2
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &origDrawFramebuffer);
+    origReadFramebuffer = origDrawFramebuffer;
+#else
     glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &origReadFramebuffer);
     glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &origDrawFramebuffer);
+#endif
 
     m_blurFramebuffer.Bind(0);
 
@@ -267,8 +272,13 @@ void BlurTexture::Update(const Renderer::Texture& sourceTexture, const PerFrameC
     Renderer::BlendMode::Set(false, Renderer::BlendMode::Function::SourceAlpha, Renderer::BlendMode::Function::OneMinusSourceAlpha);
 
     // Bind previous framebuffer and reset viewport size
+#ifdef USE_GLES2
+    static_cast<void>(origReadFramebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, origDrawFramebuffer);
+#else
     glBindFramebuffer(GL_READ_FRAMEBUFFER, origReadFramebuffer);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, origDrawFramebuffer);
+#endif
     glViewport(0, 0, sourceTexture.Width(), sourceTexture.Height());
 
     Renderer::Shader::Unbind();

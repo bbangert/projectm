@@ -16,6 +16,22 @@ namespace Renderer {
 class VertexIndexArray
 {
 public:
+#ifdef USE_GLES2
+    /**
+     * The GL index type of the uploaded buffer. GLES 2 uses 16-bit indices: 32-bit ones need
+     * GL_OES_element_index_uint, and some drivers (e.g. Mesa vc4) convert them on every draw.
+     * Indices are kept as uint32_t on the CPU and narrowed on upload.
+     */
+    static constexpr GLenum GLIndexType = GL_UNSIGNED_SHORT;
+
+    /**
+     * The number of vertices 16-bit indices can address.
+     */
+    static constexpr size_t MaxVertexCount = 65536;
+#else
+    static constexpr GLenum GLIndexType = GL_UNSIGNED_INT; //!< The GL index type of the uploaded buffer.
+#endif
+
     /**
      * Constructor. Creates an empty index buffer with the default usage hint.
      */
@@ -147,6 +163,10 @@ private:
     VertexBufferUsage m_vboUsage{VertexBufferUsage::StaticDraw}; //!< The buffer usage hint.
 
     std::vector<uint32_t> m_indices; //!< The local copy of the vertex index buffer data.
+
+#ifdef USE_GLES2
+    std::vector<uint16_t> m_uploadIndices; //!< 16-bit copy of m_indices for upload.
+#endif
 };
 
 } // namespace Renderer

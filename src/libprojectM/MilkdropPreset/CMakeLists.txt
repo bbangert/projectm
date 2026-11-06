@@ -1,17 +1,35 @@
-set(SHADER_FILES
-        Shaders/Blur1FragmentShaderGlsl330.frag
-        Shaders/Blur2FragmentShaderGlsl330.frag
-        Shaders/BlurVertexShaderGlsl330.vert
-        Shaders/PresetCompVertexShaderGlsl330.vert
-        Shaders/PresetMotionVectorsVertexShaderGlsl330.vert
-        Shaders/PresetShaderHeaderGlsl330.inc
-        Shaders/PresetWarpFragmentShaderGlsl330.frag
-        Shaders/PresetWarpVertexShaderGlsl330.vert
-        Shaders/TexturedDrawFragmentShaderGlsl330.frag
-        Shaders/TexturedDrawVertexShaderGlsl330.vert
-        Shaders/UntexturedDrawFragmentShaderGlsl330.frag
-        Shaders/UntexturedDrawVertexShaderGlsl330.vert
-        )
+if(USE_GLES2)
+    # GLSL ES 1.00 variants. The preset shader header is HLSL and shared by all variants.
+    set(SHADER_FILES
+            Shaders/Blur1FragmentShaderGlsl100.frag
+            Shaders/Blur2FragmentShaderGlsl100.frag
+            Shaders/BlurVertexShaderGlsl100.vert
+            Shaders/PresetCompVertexShaderGlsl100.vert
+            Shaders/PresetMotionVectorsVertexShaderGlsl100.vert
+            Shaders/PresetShaderHeaderGlsl330.inc
+            Shaders/PresetWarpFragmentShaderGlsl100.frag
+            Shaders/PresetWarpVertexShaderGlsl100.vert
+            Shaders/TexturedDrawFragmentShaderGlsl100.frag
+            Shaders/TexturedDrawVertexShaderGlsl100.vert
+            Shaders/UntexturedDrawFragmentShaderGlsl100.frag
+            Shaders/UntexturedDrawVertexShaderGlsl100.vert
+            )
+else()
+    set(SHADER_FILES
+            Shaders/Blur1FragmentShaderGlsl330.frag
+            Shaders/Blur2FragmentShaderGlsl330.frag
+            Shaders/BlurVertexShaderGlsl330.vert
+            Shaders/PresetCompVertexShaderGlsl330.vert
+            Shaders/PresetMotionVectorsVertexShaderGlsl330.vert
+            Shaders/PresetShaderHeaderGlsl330.inc
+            Shaders/PresetWarpFragmentShaderGlsl330.frag
+            Shaders/PresetWarpVertexShaderGlsl330.vert
+            Shaders/TexturedDrawFragmentShaderGlsl330.frag
+            Shaders/TexturedDrawVertexShaderGlsl330.vert
+            Shaders/UntexturedDrawFragmentShaderGlsl330.frag
+            Shaders/UntexturedDrawVertexShaderGlsl330.vert
+            )
+endif()
 
 string(REPLACE ";" "\\;" SHADER_FILES_ARG "${SHADER_FILES}")
 add_custom_command(OUTPUT

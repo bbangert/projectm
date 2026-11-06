@@ -145,7 +145,7 @@ void Mesh::Draw()
             break;
     }
 
-    glDrawElements(primitiveType, m_indices.Size(), GL_UNSIGNED_INT, nullptr);
+    glDrawElements(primitiveType, static_cast<GLsizei>(m_indices.Size()), VertexIndexArray::GLIndexType, nullptr);
 
     VertexArray::Unbind();
 }

@@ -163,6 +163,8 @@ public:
     /**
      * @brief Sets a float 3x4 matrix uniform.
      * The program must be bound before calling this method!
+     * On GLES 2, which has no non-square matrices, the uniform must be declared as mat4. It receives
+     * the three columns and a zero fourth column.
      * @param uniform The uniform name
      * @param values The matrix to set.
      */

@@ -19,9 +19,9 @@ foreach(shader_file IN LISTS SHADER_FILES)
 
     if(_shader_type STREQUAL ".inc")
         # Includes don't get the header prepended.
-        string(APPEND STATIC_SHADER_ACCESSOR_DEFINITIONS "DECLARE_SHADER_ACCESSOR_NO_HEADER(${_accessor_name});\n")
+        string(APPEND STATIC_SHADER_ACCESSOR_DEFINITIONS "DECLARE_SHADER_ACCESSOR_NO_HEADER(${_accessor_name}, k${_shader_name});\n")
     else()
-        string(APPEND STATIC_SHADER_ACCESSOR_DEFINITIONS "DECLARE_SHADER_ACCESSOR(${_accessor_name});\n")
+        string(APPEND STATIC_SHADER_ACCESSOR_DEFINITIONS "DECLARE_SHADER_ACCESSOR(${_accessor_name}, k${_shader_name});\n")
     endif()
 endforeach()
 

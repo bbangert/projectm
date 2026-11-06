@@ -190,6 +190,18 @@ public:
 
     void SetMeshSize(uint32_t meshResolutionX, uint32_t meshResolutionY);
 
+    /**
+     * @brief Constrains a requested per-pixel mesh size to the supported range.
+     *
+     * Both dimensions are rounded up to even values and clamped to 8..300. With USE_GLES2, the
+     * larger dimension is then reduced until the (x + 1) * (y + 1) mesh vertices fit 16-bit indices.
+     *
+     * @param meshResolutionX The horizontal mesh resolution, updated in place.
+     * @param meshResolutionY The vertical mesh resolution, updated in place.
+     * @return true if the size was reduced to fit 16-bit indices.
+     */
+    static auto ConstrainMeshSize(uint32_t& meshResolutionX, uint32_t& meshResolutionY) -> bool;
+
     void TexelOffsets(float& texelOffsetX, float& texelOffsetY) const;
 
     void SetTexelOffsets(float texelOffsetX, float texelOffsetY);
