@@ -403,6 +403,32 @@ constexpr const char* UpscaleFragmentShader =
     "uniform sampler2D image;\n"
     "void main() { gl_FragColor = vec4(texture2D(image, uv).rgb, 1.0); }\n";
 
+auto GLESMajorVersion() -> int
+{
+    const char* version = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+    int major{};
+    if (version == nullptr || std::sscanf(version, "OpenGL ES %d", &major) != 1)
+    {
+        return 0;
+    }
+    return major;
+}
+
+auto HasExtension(const char* extension) -> bool
+{
+    const char* extensions = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
+    const size_t length = std::strlen(extension);
+    for (const char* found = extensions ? std::strstr(extensions, extension) : nullptr; found != nullptr;
+         found = std::strstr(found + length, extension))
+    {
+        if ((found == extensions || found[-1] == ' ') && (found[length] == ' ' || found[length] == '\0'))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 auto BaseName(const std::string& path) -> std::string
 {
     return path.substr(path.find_last_of('/') + 1);
@@ -527,9 +553,20 @@ int main(int argc, char** argv)
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
     // projectM leaves its own VAO and sampler bindings alone after drawing, but reset them anyway.
-    auto bindVertexArray = reinterpret_cast<PFNGLBINDVERTEXARRAYOESPROC>(eglGetProcAddress("glBindVertexArrayOES"));
+    // eglGetProcAddress can return dispatch stubs for functions the context doesn't support, so
+    // check the context version and extensions rather than the pointers.
+    const int glesMajor = GLESMajorVersion();
+    PFNGLBINDVERTEXARRAYOESPROC bindVertexArray = nullptr;
+    if (glesMajor >= 3 || HasExtension("GL_OES_vertex_array_object"))
+    {
+        bindVertexArray = reinterpret_cast<PFNGLBINDVERTEXARRAYOESPROC>(eglGetProcAddress(glesMajor >= 3 ? "glBindVertexArray" : "glBindVertexArrayOES"));
+    }
     using BindSamplerProc = void (*)(GLuint, GLuint);
-    auto bindSampler = reinterpret_cast<BindSamplerProc>(eglGetProcAddress("glBindSampler"));
+    BindSamplerProc bindSampler = nullptr;
+    if (glesMajor >= 3 || HasExtension("GL_MESA_sampler_objects"))
+    {
+        bindSampler = reinterpret_cast<BindSamplerProc>(eglGetProcAddress("glBindSampler"));
+    }
 
     // projectM
     projectm_set_log_callback(&LogCallback, false, nullptr);
