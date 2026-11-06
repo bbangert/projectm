@@ -365,14 +365,22 @@ private:
     void CheckGLSLVersion();
 
     /**
-     * @brief Creates and initializes a preset and reports the load result.
-     * @param presetFilename The preset filename, also used for reporting.
+     * @brief Creates and initializes a preset. Doesn't report the result, see ReportPresetLoad().
+     * @param presetFilename The preset filename.
      * @param presetData The preset data to load instead of the file, or nullptr.
-     * @param loadResult Receives the load result if not nullptr.
+     * @param loadResult Receives the load result.
      * @return The initialized preset, or nullptr if it could not be loaded.
      */
     auto CreatePreset(const std::string& presetFilename, std::istream* presetData,
-                      PresetLoadResult* loadResult) -> std::unique_ptr<Preset>;
+                      PresetLoadResult& loadResult) -> std::unique_ptr<Preset>;
+
+    /**
+     * @brief Calls PresetLoadResultEvent(), then PresetSwitchFailedEvent() if nothing was loaded.
+     * @param presetFilename The preset filename, empty for preset data.
+     * @param result The load result.
+     * @param loaded True if the preset was loaded (possibly with fallback shaders).
+     */
+    void ReportPresetLoad(const std::string& presetFilename, const PresetLoadResult& result, bool loaded);
 
     /**
      * @brief Creates, initializes and warms up a preset and keeps it as the preloaded preset.
@@ -383,7 +391,8 @@ private:
     auto PreloadPreset(const std::string& presetFilename, std::istream* presetData) -> PresetLoadResult;
 
     /**
-     * @brief Renders one frame of a preset clipped to one pixel, restoring the caller's GL state.
+     * @brief Renders one frame of a preset clipped to one pixel, restoring the scissor state.
+     * The caller restores the framebuffer bindings and the viewport.
      * @param preset The initialized preset.
      */
     void WarmUpPreset(Preset& preset);

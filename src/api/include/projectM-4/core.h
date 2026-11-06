@@ -136,8 +136,9 @@ PROJECTM_EXPORT void projectm_load_preset_data(projectm_handle instance, const c
  * projectm_activate_preloaded_preset().
  *
  * Call it between frames with projectM's OpenGL context current. A previously preloaded preset
- * is discarded. The result is also reported to the preset load result callback, and to the
- * preset switch failed callback if the preset can't be loaded at all.
+ * is discarded. The framebuffer bindings, viewport and scissor state are restored on return.
+ * After the warm-up frame, the result is also reported to the preset load result callback, and
+ * to the preset switch failed callback if nothing was preloaded.
  *
  * @param instance The projectM instance handle.
  * @param filename The preset filename or URL to load.

@@ -44,6 +44,87 @@
 
 namespace libprojectM {
 
+namespace {
+
+/**
+ * @brief Saves the framebuffer bindings and the viewport, and restores them when destroyed.
+ */
+class FramebufferStateGuard
+{
+public:
+    FramebufferStateGuard()
+    {
+#ifdef USE_GLES2
+        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &m_drawFramebuffer);
+#else
+        glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &m_drawFramebuffer);
+        glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &m_readFramebuffer);
+#endif
+        glGetIntegerv(GL_VIEWPORT, m_viewport.data());
+    }
+
+    ~FramebufferStateGuard()
+    {
+#ifdef USE_GLES2
+        Rebind(GL_FRAMEBUFFER, m_drawFramebuffer);
+#else
+        Rebind(GL_DRAW_FRAMEBUFFER, m_drawFramebuffer);
+        Rebind(GL_READ_FRAMEBUFFER, m_readFramebuffer);
+#endif
+        glViewport(m_viewport[0], m_viewport[1], m_viewport[2], m_viewport[3]);
+    }
+
+    FramebufferStateGuard(const FramebufferStateGuard&) = delete;
+    auto operator=(const FramebufferStateGuard&) -> FramebufferStateGuard& = delete;
+
+private:
+    static void Rebind(GLenum target, GLint framebuffer)
+    {
+        // A framebuffer deleted meanwhile can't be bound again.
+        auto const name = static_cast<GLuint>(framebuffer);
+        glBindFramebuffer(target, name == 0 || glIsFramebuffer(name) ? name : 0);
+    }
+
+    GLint m_drawFramebuffer{};
+#ifndef USE_GLES2
+    GLint m_readFramebuffer{};
+#endif
+    std::array<GLint, 4> m_viewport{};
+};
+
+/**
+ * @brief Clips drawing to the bottom left pixel, and restores the scissor state when destroyed.
+ */
+class OnePixelScissorGuard
+{
+public:
+    OnePixelScissorGuard()
+        : m_scissorEnabled(glIsEnabled(GL_SCISSOR_TEST))
+    {
+        glGetIntegerv(GL_SCISSOR_BOX, m_scissorBox.data());
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(0, 0, 1, 1);
+    }
+
+    ~OnePixelScissorGuard()
+    {
+        glScissor(m_scissorBox[0], m_scissorBox[1], m_scissorBox[2], m_scissorBox[3]);
+        if (!m_scissorEnabled)
+        {
+            glDisable(GL_SCISSOR_TEST);
+        }
+    }
+
+    OnePixelScissorGuard(const OnePixelScissorGuard&) = delete;
+    auto operator=(const OnePixelScissorGuard&) -> OnePixelScissorGuard& = delete;
+
+private:
+    GLboolean m_scissorEnabled{};
+    std::array<GLint, 4> m_scissorBox{};
+};
+
+} // namespace
+
 ProjectM::ProjectM()
     : m_presetFactoryManager(std::make_unique<PresetFactoryManager>())
 {
@@ -69,7 +150,9 @@ void ProjectM::PresetLoadResultEvent(const std::string&, const PresetLoadResult&
 
 void ProjectM::LoadPresetFile(const std::string& presetFilename, bool smoothTransition)
 {
-    auto preset = CreatePreset(presetFilename, nullptr, nullptr);
+    PresetLoadResult result;
+    auto preset = CreatePreset(presetFilename, nullptr, result);
+    ReportPresetLoad(presetFilename, result, preset != nullptr);
     if (preset)
     {
         StartPresetTransition(std::move(preset), !smoothTransition);
@@ -78,7 +161,9 @@ void ProjectM::LoadPresetFile(const std::string& presetFilename, bool smoothTran
 
 void ProjectM::LoadPresetData(std::istream& presetData, bool smoothTransition)
 {
-    auto preset = CreatePreset("", &presetData, nullptr);
+    PresetLoadResult result;
+    auto preset = CreatePreset("", &presetData, result);
+    ReportPresetLoad("", result, preset != nullptr);
     if (preset)
     {
         StartPresetTransition(std::move(preset), !smoothTransition);
@@ -113,29 +198,35 @@ void ProjectM::DiscardPreloadedPreset()
 
 auto ProjectM::PreloadPreset(const std::string& presetFilename, std::istream* presetData) -> PresetLoadResult
 {
-    m_preloadedPreset.reset();
-
     PresetLoadResult result;
-    auto preset = CreatePreset(presetFilename, presetData, &result);
-    if (!preset)
+    bool preloaded{false};
     {
-        return result;
+        // Destroying, creating and warming up a preset binds its own framebuffers.
+        FramebufferStateGuard framebufferState;
+
+        m_preloadedPreset.reset();
+
+        auto preset = CreatePreset(presetFilename, presetData, result);
+        if (preset)
+        {
+            try
+            {
+                WarmUpPreset(*preset);
+                m_preloadedPreset = std::move(preset);
+                preloaded = true;
+            }
+            catch (const std::exception& ex)
+            {
+                LOG_ERROR(std::string("[ProjectM] Error warming up preset: ") + ex.what());
+                result.status = PresetLoadResult::Status::OtherError;
+                result.stage = PresetLoadResult::NoStage;
+                result.message = ex.what();
+            }
+        }
     }
 
-    try
-    {
-        WarmUpPreset(*preset);
-    }
-    catch (const std::exception& ex)
-    {
-        LOG_ERROR(std::string("[ProjectM] Error warming up preset: ") + ex.what());
-        result.status = PresetLoadResult::Status::OtherError;
-        result.stage = PresetLoadResult::NoStage;
-        result.message = ex.what();
-        return result;
-    }
-
-    m_preloadedPreset = std::move(preset);
+    // The callbacks may load or preload another preset.
+    ReportPresetLoad(presetFilename, result, preloaded);
     return result;
 }
 
@@ -150,54 +241,18 @@ void ProjectM::WarmUpPreset(Preset& preset)
     // (e.g. Mesa vc4) do it now, at almost no fill cost. The frame's CPU work (expression
     // evaluation) is not saved. It changes one pixel of the preset's own buffers, which
     // activation overwrites with the initial image unless presets start clean.
-    GLint framebuffer{};
-#ifdef USE_GLES2
-    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &framebuffer);
-#else
-    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &framebuffer);
-#endif
-    std::array<GLint, 4> viewport{};
-    glGetIntegerv(GL_VIEWPORT, viewport.data());
-    std::array<GLint, 4> scissorBox{};
-    glGetIntegerv(GL_SCISSOR_BOX, scissorBox.data());
-    GLboolean const scissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
-
-    glEnable(GL_SCISSOR_TEST);
-    glScissor(0, 0, 1, 1);
-
-    auto restoreState = [&]() {
-        glScissor(scissorBox[0], scissorBox[1], scissorBox[2], scissorBox[3]);
-        if (!scissorEnabled)
-        {
-            glDisable(GL_SCISSOR_TEST);
-        }
-#ifdef USE_GLES2
-        glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(framebuffer));
-#else
-        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(framebuffer));
-#endif
-        glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
-    };
-
-    try
     {
+        OnePixelScissorGuard scissor;
         preset.RenderFrame(m_audioStorage.GetFrameAudioData(), GetRenderContext());
     }
-    catch (...)
-    {
-        restoreState();
-        throw;
-    }
-    restoreState();
 
     glFlush();
 }
 
 auto ProjectM::CreatePreset(const std::string& presetFilename, std::istream* presetData,
-                            PresetLoadResult* loadResult) -> std::unique_ptr<Preset>
+                            PresetLoadResult& loadResult) -> std::unique_ptr<Preset>
 {
     std::unique_ptr<Preset> preset;
-    PresetLoadResult result;
     try
     {
         m_textureManager->PurgeTextures();
@@ -216,31 +271,28 @@ auto ProjectM::CreatePreset(const std::string& presetFilename, std::istream* pre
         }
 
         preset->Initialize(GetRenderContext());
-        result = preset->LoadResult();
+        loadResult = preset->LoadResult();
     }
     catch (const std::exception& ex)
     {
         LOG_ERROR(ex.what());
 
-        result = PresetLoadResult();
-        result.status = PresetLoadResult::Status::OtherError;
-        result.message = ex.what();
-        if (loadResult != nullptr)
-        {
-            *loadResult = result;
-        }
-        PresetLoadResultEvent(presetFilename, result);
-
-        PresetSwitchFailedEvent(presetFilename, ex.what());
+        loadResult = PresetLoadResult();
+        loadResult.status = PresetLoadResult::Status::OtherError;
+        loadResult.message = ex.what();
         return nullptr;
     }
 
-    if (loadResult != nullptr)
-    {
-        *loadResult = result;
-    }
-    PresetLoadResultEvent(presetFilename, result);
     return preset;
+}
+
+void ProjectM::ReportPresetLoad(const std::string& presetFilename, const PresetLoadResult& result, bool loaded)
+{
+    PresetLoadResultEvent(presetFilename, result);
+    if (!loaded)
+    {
+        PresetSwitchFailedEvent(presetFilename, result.message);
+    }
 }
 
 void ProjectM::SetTexturePaths(std::vector<std::string> texturePaths)
