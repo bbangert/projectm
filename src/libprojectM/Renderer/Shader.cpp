@@ -14,7 +14,7 @@ namespace {
 
 /**
  * GLSL ES 1.00 has no layout(location = N) qualifiers. The vertex attribute indices the meshes use
- * (Mesh: 0-2, PerPixelMesh: 3-7, FinalComposite: 3) are bound by attribute name before linking.
+ * (Mesh: 0-2, PerPixelMesh: 3-4, FinalComposite: 3) are bound by attribute name before linking.
  */
 struct AttributeLocation
 {
@@ -31,10 +31,7 @@ constexpr AttributeLocation AttributeLocations[] = {
     {"tex_coord", 2},
     {"vertex_rad_ang", 3},
     {"rad_ang", 3},
-    {"transforms", 4},
-    {"warp_center", 5},
-    {"warp_distance", 6},
-    {"stretch", 7},
+    {"warp_uv", 4},
 };
 
 void BindAttributeLocations(GLuint program)

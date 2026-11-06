@@ -51,6 +51,25 @@ public:
               const PerFrameContext& perFrameContext,
               PerPixelContext& perPixelContext);
 
+#ifdef USE_GLES2
+    /**
+     * @brief The warp mesh texture coordinates of the last drawn frame.
+     */
+    struct WarpUVGrid
+    {
+        const Renderer::Point* uvs{}; //!< (sizeX + 1) * (sizeY + 1) u/v coordinates, row by row from mesh Y = -1, or nullptr if no frame was drawn yet.
+        int sizeX{};                  //!< Mesh cells horizontally.
+        int sizeY{};                  //!< Mesh cells vertically.
+    };
+
+    /**
+     * @brief Returns the u/v coordinates the last Draw() computed on the CPU.
+     *
+     * Motion vectors trace back along these, as the GLES 2 backend has no u/v map render target.
+     * @return The u/v grid of the last drawn frame.
+     */
+    auto LastWarpUVs() const -> WarpUVGrid;
+#endif
 
 private:
     /**
@@ -123,10 +142,15 @@ private:
 
     Renderer::Mesh m_warpMesh;                                                                         //!< The Warp effect mesh
     Renderer::VertexBuffer<RadiusAngle> m_radiusAngleBuffer{Renderer::VertexBufferUsage::StreamDraw};  //!< Vertex attribute buffer for radius and angle values.
+#ifdef USE_GLES2
+    Renderer::VertexBuffer<Renderer::Point> m_warpUVBuffer{Renderer::VertexBufferUsage::StreamDraw}; //!< Vertex attribute buffer for the u/v coordinates computed on the CPU.
+    bool m_warpUVsValid{false};                                                                       //!< True once m_warpUVBuffer holds a drawn frame's coordinates.
+#else
     Renderer::VertexBuffer<ZoomRotWarp> m_zoomRotWarpBuffer{Renderer::VertexBufferUsage::StreamDraw};  //!< Vertex attribute buffer for zoom, roation and warp values.
     Renderer::VertexBuffer<Renderer::Point> m_centerBuffer{Renderer::VertexBufferUsage::StreamDraw};   //!< Vertex attribute buffer for center coordinate values.
     Renderer::VertexBuffer<Renderer::Point> m_distanceBuffer{Renderer::VertexBufferUsage::StreamDraw}; //!< Vertex attribute buffer for distance values.
     Renderer::VertexBuffer<Renderer::Point> m_stretchBuffer{Renderer::VertexBufferUsage::StreamDraw};  //!< Vertex attribute buffer for stretch values.
+#endif
 
     std::weak_ptr<Renderer::Shader> m_perPixelMeshShader;             //!< Special shader which calculates the per-pixel UV coordinates.
     std::unique_ptr<MilkdropShader> m_warpShader;                     //!< The warp shader. Either preset-defined or a default shader.
