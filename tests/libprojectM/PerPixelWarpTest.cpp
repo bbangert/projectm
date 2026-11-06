@@ -10,6 +10,8 @@
 using libprojectM::MilkdropPreset::InterpolateWarpTextureCoordinates;
 using libprojectM::MilkdropPreset::MotionVectorEndPoint;
 using libprojectM::MilkdropPreset::WarpFrameParameters;
+using libprojectM::MilkdropPreset::WarpOffsetTable;
+using libprojectM::MilkdropPreset::WarpZoom;
 using libprojectM::MilkdropPreset::WarpTextureCoordinates;
 using libprojectM::MilkdropPreset::WarpVertexParameters;
 using libprojectM::Renderer::Point;
@@ -102,24 +104,25 @@ auto MakeMeshUVs(const WarpFrameParameters& frame, const WarpVertexParameters& v
             const float radius = hypotf(posX * frame.aspectX, posY * frame.aspectY);
             float u{};
             float v{};
-            WarpTextureCoordinates(frame, posX, posY, radius, vertex, cosf(vertex.rot), sinf(vertex.rot), u, v);
+            WarpTextureCoordinates(frame, posX, posY, radius, vertex, u, v);
             uvs.emplace_back(u, v);
         }
     }
     return uvs;
 }
 
-} // namespace
-
-TEST(PerPixelWarp, MatchesWarpVertexShader)
+auto TestFrames() -> std::vector<WarpFrameParameters>
 {
-    const WarpFrameParameters frames[] = {
+    return {
         MakeFrame(1.0f, 1.0f, 0.0f, 1.0f, 0.0f),
         MakeFrame(0.5625f, 1.0f, 12.5f, 1.3f, 0.0f),
         MakeFrame(1.0f, 0.75f, 345.25f, 0.4f, 0.5f / 640.0f),
     };
+}
 
-    WarpVertexParameters vertices[5];
+auto TestVertices() -> std::vector<WarpVertexParameters>
+{
+    std::vector<WarpVertexParameters> vertices(5);
     // Identity
     vertices[0] = WarpVertexParameters{};
     // Zoom with a zoom exponent, rotation and warp around the center
@@ -152,10 +155,16 @@ TEST(PerPixelWarp, MatchesWarpVertexShader)
     // Pure translation
     vertices[4].dx = 0.05f;
     vertices[4].dy = 0.025f;
+    return vertices;
+}
 
-    for (const auto& frame : frames)
+} // namespace
+
+TEST(PerPixelWarp, MatchesWarpVertexShader)
+{
+    for (const auto& frame : TestFrames())
     {
-        for (const auto& vertex : vertices)
+        for (const auto& vertex : TestVertices())
         {
             for (int y = 0; y <= 6; y++)
             {
@@ -167,11 +176,50 @@ TEST(PerPixelWarp, MatchesWarpVertexShader)
 
                     float u{};
                     float v{};
-                    WarpTextureCoordinates(frame, posX, posY, radius, vertex, cosf(vertex.rot), sinf(vertex.rot), u, v);
+                    WarpTextureCoordinates(frame, posX, posY, radius, vertex, u, v);
                     const auto reference = ReferenceWarpShader(frame, {posX, posY}, radius, vertex);
 
                     EXPECT_NEAR(u, reference.x, 2e-5) << "pos " << posX << "," << posY;
                     EXPECT_NEAR(v, reference.y, 2e-5) << "pos " << posX << "," << posY;
+                }
+            }
+        }
+    }
+}
+
+TEST(PerPixelWarp, PrecomputedTermsMatchWarpVertexShader)
+{
+    // The path PerPixelMesh takes: warp terms from the per-frame table, zoom from hoisted logs.
+    constexpr int gridX = 48;
+    constexpr int gridY = 36;
+    WarpOffsetTable table;
+
+    for (const auto& frame : TestFrames())
+    {
+        table.Update(frame, gridX, gridY);
+        for (const auto& vertex : TestVertices())
+        {
+            const float log2Zoom = log2f(vertex.zoom);
+            const float log2ZoomExp = log2f(vertex.zoomExp);
+            for (int y = 0; y <= gridY; y++)
+            {
+                for (int x = 0; x <= gridX; x++)
+                {
+                    const float posX = static_cast<float>(x) / static_cast<float>(gridX) * 2.0f - 1.0f;
+                    const float posY = static_cast<float>(y) / static_cast<float>(gridY) * 2.0f - 1.0f;
+                    const float radius = hypotf(posX * frame.aspectX, posY * frame.aspectY);
+
+                    float offsetU{};
+                    float offsetV{};
+                    table.Offsets(x, y, offsetU, offsetV);
+                    float u{};
+                    float v{};
+                    WarpTextureCoordinates(frame, posX, posY, WarpZoom(vertex.zoom, log2Zoom, vertex.zoomExp, log2ZoomExp, radius),
+                                           vertex, offsetU, offsetV, cosf(vertex.rot), sinf(vertex.rot), u, v);
+                    const auto reference = ReferenceWarpShader(frame, {posX, posY}, radius, vertex);
+
+                    ASSERT_NEAR(u, reference.x, 2e-5) << "vertex " << x << "," << y;
+                    ASSERT_NEAR(v, reference.y, 2e-5) << "vertex " << x << "," << y;
                 }
             }
         }
@@ -222,7 +270,7 @@ TEST(PerPixelWarp, InterpolationIsExactForAffineMeshes)
             const float posY = y * 2.0f - 1.0f;
             float expectedU{};
             float expectedV{};
-            WarpTextureCoordinates(frame, posX, posY, hypotf(posX * frame.aspectX, posY), vertex, cosf(vertex.rot), sinf(vertex.rot), expectedU, expectedV);
+            WarpTextureCoordinates(frame, posX, posY, hypotf(posX * frame.aspectX, posY), vertex, expectedU, expectedV);
             EXPECT_NEAR(u, expectedU, 1e-5);
             EXPECT_NEAR(v, expectedV, 1e-5);
         }

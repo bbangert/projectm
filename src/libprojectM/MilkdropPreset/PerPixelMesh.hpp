@@ -1,5 +1,7 @@
 #pragma once
 
+#include "PerPixelWarp.hpp"
+
 #include <Renderer/Mesh.hpp>
 #include <Renderer/Shader.hpp>
 
@@ -144,6 +146,7 @@ private:
     Renderer::VertexBuffer<RadiusAngle> m_radiusAngleBuffer{Renderer::VertexBufferUsage::StreamDraw};  //!< Vertex attribute buffer for radius and angle values.
 #ifdef USE_GLES2
     Renderer::VertexBuffer<Renderer::Point> m_warpUVBuffer{Renderer::VertexBufferUsage::StreamDraw}; //!< Vertex attribute buffer for the u/v coordinates computed on the CPU.
+    WarpOffsetTable m_warpOffsets;                                                                    //!< Per-frame warp terms of the mesh.
     bool m_warpUVsValid{false};                                                                       //!< True once m_warpUVBuffer holds a drawn frame's coordinates.
 #else
     Renderer::VertexBuffer<ZoomRotWarp> m_zoomRotWarpBuffer{Renderer::VertexBufferUsage::StreamDraw};  //!< Vertex attribute buffer for zoom, roation and warp values.

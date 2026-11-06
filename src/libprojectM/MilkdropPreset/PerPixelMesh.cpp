@@ -256,70 +256,83 @@ void PerPixelMesh::CalculateMesh(const PresetState& presetState, const PerFrameC
         static_cast<float>(*perFrameContext.sy)};
 
 #ifdef USE_GLES2
+    // Per-frame parts of the u/v math, reused for every vertex that shares the frame values.
     auto const warpFrame = GetWarpFrameParameters(presetState);
+    m_warpOffsets.Update(warpFrame, m_gridSizeX, m_gridSizeY);
     float const frameCosRot = cosf(frameValues.rot);
     float const frameSinRot = sinf(frameValues.rot);
+    float const frameLog2Zoom = log2f(frameValues.zoom);
+    float const frameLog2ZoomExp = log2f(frameValues.zoomExp);
     Renderer::Point* const uvs = m_warpUVBuffer.Get().data();
 #endif
 
     const Renderer::Point* const vertices = m_warpMesh.Vertices().Get().data();
     const RadiusAngle* const radiusAngles = m_radiusAngleBuffer.Get().data();
-    int const vertexCount = (m_gridSizeX + 1) * (m_gridSizeY + 1);
 
     // Can't make this multithreaded as per-pixel code may use gmegabuf or regXX vars.
-    for (int vertex = 0; vertex < vertexCount; vertex++)
+    int vertex = 0;
+    for (int gridY = 0; gridY <= m_gridSizeY; gridY++)
     {
-        auto const& curVertex = vertices[vertex];
-        auto const& curRadiusAngle = radiusAngles[vertex];
-        WarpVertexParameters values = frameValues;
-
-        // Execute per-vertex/per-pixel code if the preset uses it.
-        if (perPixelContext.perPixelCodeHandle)
+        for (int gridX = 0; gridX <= m_gridSizeX; gridX++, vertex++)
         {
-            *perPixelContext.x = static_cast<double>(curVertex.X() * 0.5f * presetState.renderContext.aspectX + 0.5f);
-            *perPixelContext.y = static_cast<double>(curVertex.Y() * 0.5f * presetState.renderContext.aspectY + 0.5f);
-            *perPixelContext.rad = static_cast<double>(curRadiusAngle.radius);
-            *perPixelContext.ang = static_cast<double>(-curRadiusAngle.angle);
-            *perPixelContext.zoom = static_cast<double>(*perFrameContext.zoom);
-            *perPixelContext.zoomexp = static_cast<double>(*perFrameContext.zoomexp);
-            *perPixelContext.rot = static_cast<double>(*perFrameContext.rot);
-            *perPixelContext.warp = static_cast<double>(*perFrameContext.warp);
-            *perPixelContext.cx = static_cast<double>(*perFrameContext.cx);
-            *perPixelContext.cy = static_cast<double>(*perFrameContext.cy);
-            *perPixelContext.dx = static_cast<double>(*perFrameContext.dx);
-            *perPixelContext.dy = static_cast<double>(*perFrameContext.dy);
-            *perPixelContext.sx = static_cast<double>(*perFrameContext.sx);
-            *perPixelContext.sy = static_cast<double>(*perFrameContext.sy);
+            auto const& curVertex = vertices[vertex];
+            auto const& curRadiusAngle = radiusAngles[vertex];
+            WarpVertexParameters values = frameValues;
 
-            perPixelContext.ExecutePerPixelCode();
+            // Execute per-vertex/per-pixel code if the preset uses it.
+            if (perPixelContext.perPixelCodeHandle)
+            {
+                *perPixelContext.x = static_cast<double>(curVertex.X() * 0.5f * presetState.renderContext.aspectX + 0.5f);
+                *perPixelContext.y = static_cast<double>(curVertex.Y() * 0.5f * presetState.renderContext.aspectY + 0.5f);
+                *perPixelContext.rad = static_cast<double>(curRadiusAngle.radius);
+                *perPixelContext.ang = static_cast<double>(-curRadiusAngle.angle);
+                *perPixelContext.zoom = static_cast<double>(*perFrameContext.zoom);
+                *perPixelContext.zoomexp = static_cast<double>(*perFrameContext.zoomexp);
+                *perPixelContext.rot = static_cast<double>(*perFrameContext.rot);
+                *perPixelContext.warp = static_cast<double>(*perFrameContext.warp);
+                *perPixelContext.cx = static_cast<double>(*perFrameContext.cx);
+                *perPixelContext.cy = static_cast<double>(*perFrameContext.cy);
+                *perPixelContext.dx = static_cast<double>(*perFrameContext.dx);
+                *perPixelContext.dy = static_cast<double>(*perFrameContext.dy);
+                *perPixelContext.sx = static_cast<double>(*perFrameContext.sx);
+                *perPixelContext.sy = static_cast<double>(*perFrameContext.sy);
 
-            values = {static_cast<float>(*perPixelContext.zoom),
-                      static_cast<float>(*perPixelContext.zoomexp),
-                      static_cast<float>(*perPixelContext.rot),
-                      static_cast<float>(*perPixelContext.warp),
-                      static_cast<float>(*perPixelContext.cx),
-                      static_cast<float>(*perPixelContext.cy),
-                      static_cast<float>(*perPixelContext.dx),
-                      static_cast<float>(*perPixelContext.dy),
-                      static_cast<float>(*perPixelContext.sx),
-                      static_cast<float>(*perPixelContext.sy)};
-        }
+                perPixelContext.ExecutePerPixelCode();
+
+                values = {static_cast<float>(*perPixelContext.zoom),
+                          static_cast<float>(*perPixelContext.zoomexp),
+                          static_cast<float>(*perPixelContext.rot),
+                          static_cast<float>(*perPixelContext.warp),
+                          static_cast<float>(*perPixelContext.cx),
+                          static_cast<float>(*perPixelContext.cy),
+                          static_cast<float>(*perPixelContext.dx),
+                          static_cast<float>(*perPixelContext.dy),
+                          static_cast<float>(*perPixelContext.sx),
+                          static_cast<float>(*perPixelContext.sy)};
+            }
 
 #ifdef USE_GLES2
-        bool const ownRotation = values.rot != frameValues.rot;
-        float u{};
-        float v{};
-        WarpTextureCoordinates(warpFrame, curVertex.X(), curVertex.Y(), curRadiusAngle.radius, values,
-                               ownRotation ? cosf(values.rot) : frameCosRot,
-                               ownRotation ? sinf(values.rot) : frameSinRot,
-                               u, v);
-        uvs[vertex] = {u, v};
+            bool const ownRotation = values.rot != frameValues.rot;
+            float const zoom2 = WarpZoom(values.zoom, values.zoom != frameValues.zoom ? log2f(values.zoom) : frameLog2Zoom,
+                                         values.zoomExp, values.zoomExp != frameValues.zoomExp ? log2f(values.zoomExp) : frameLog2ZoomExp,
+                                         curRadiusAngle.radius);
+            float warpOffsetU{};
+            float warpOffsetV{};
+            m_warpOffsets.Offsets(gridX, gridY, warpOffsetU, warpOffsetV);
+            float u{};
+            float v{};
+            WarpTextureCoordinates(warpFrame, curVertex.X(), curVertex.Y(), zoom2, values, warpOffsetU, warpOffsetV,
+                                   ownRotation ? cosf(values.rot) : frameCosRot,
+                                   ownRotation ? sinf(values.rot) : frameSinRot,
+                                   u, v);
+            uvs[vertex] = {u, v};
 #else
-        m_zoomRotWarpBuffer[vertex] = {values.zoom, values.zoomExp, values.rot, values.warp};
-        m_centerBuffer[vertex] = {values.cx, values.cy};
-        m_distanceBuffer[vertex] = {values.dx, values.dy};
-        m_stretchBuffer[vertex] = {values.sx, values.sy};
+            m_zoomRotWarpBuffer[vertex] = {values.zoom, values.zoomExp, values.rot, values.warp};
+            m_centerBuffer[vertex] = {values.cx, values.cy};
+            m_distanceBuffer[vertex] = {values.dx, values.dy};
+            m_stretchBuffer[vertex] = {values.sx, values.sy};
 #endif
+        }
     }
 
 #ifdef USE_GLES2
