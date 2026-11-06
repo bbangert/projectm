@@ -6,7 +6,8 @@
  * (e.g. a DRM render node), renders presets into an FBO and checks the result:
  *  - the context is the ES major version the library was built for (2 for ENABLE_GLES2),
  *  - every frame completes without GL errors,
- *  - the last frame of each preset is not entirely black.
+ *  - the last frame of each preset is not entirely black,
+ *  - on the ES 2 backend, the static warp mesh geometry is uploaded once per preset, not per frame.
  *
  * Usage:
  *   projectM-gles-smoke [--gbm <device>] [--size <w>x<h>] [--frames <n>] [--texture-path <dir>]
@@ -100,9 +101,52 @@ void SwitchFailedCallback(const char* presetFilename, const char* message, void*
     g_lastSwitchFailureMessage = message ? message : "";
 }
 
+constexpr int MeshSizeX = 48;
+constexpr int MeshSizeY = 36;
+
+// The library's buffer uploads go through these wrappers, which count the ones of the warp mesh
+// triangle list. It is recognized by its size, as no other index buffer has that many entries.
+#ifdef PROJECTM_SMOKE_GLES2
+constexpr GLsizeiptr WarpMeshIndexBytes = MeshSizeX * MeshSizeY * 6 * sizeof(GLushort);
+#else
+constexpr GLsizeiptr WarpMeshIndexBytes = MeshSizeX * MeshSizeY * 6 * sizeof(GLuint);
+#endif
+PFNGLBUFFERDATAPROC g_bufferData{};
+PFNGLBUFFERSUBDATAPROC g_bufferSubData{};
+unsigned g_warpMeshIndexUploads{};
+
+void GL_APIENTRY CountingBufferData(GLenum target, GLsizeiptr size, const void* data, GLenum usage)
+{
+    if (target == GL_ELEMENT_ARRAY_BUFFER && size == WarpMeshIndexBytes)
+    {
+        g_warpMeshIndexUploads++;
+    }
+    g_bufferData(target, size, data, usage);
+}
+
+void GL_APIENTRY CountingBufferSubData(GLenum target, GLintptr offset, GLsizeiptr size, const void* data)
+{
+    if (target == GL_ELEMENT_ARRAY_BUFFER && size == WarpMeshIndexBytes)
+    {
+        g_warpMeshIndexUploads++;
+    }
+    g_bufferSubData(target, offset, size, data);
+}
+
 void* LoadProc(const char* name, void*)
 {
-    return reinterpret_cast<void*>(eglGetProcAddress(name));
+    auto* function = reinterpret_cast<void*>(eglGetProcAddress(name));
+    if (function != nullptr && std::strcmp(name, "glBufferData") == 0)
+    {
+        g_bufferData = reinterpret_cast<PFNGLBUFFERDATAPROC>(function);
+        return reinterpret_cast<void*>(&CountingBufferData);
+    }
+    if (function != nullptr && std::strcmp(name, "glBufferSubData") == 0)
+    {
+        g_bufferSubData = reinterpret_cast<PFNGLBUFFERSUBDATAPROC>(function);
+        return reinterpret_cast<void*>(&CountingBufferSubData);
+    }
+    return function;
 }
 
 auto HasExtension(const char* extensions, const char* name) -> bool
@@ -342,7 +386,7 @@ int main(int argc, char** argv)
     std::printf("projectM created in %.1f ms\n", createMs);
 
     projectm_set_window_size(projectM, static_cast<size_t>(options.width), static_cast<size_t>(options.height));
-    projectm_set_mesh_size(projectM, 48, 36);
+    projectm_set_mesh_size(projectM, MeshSizeX, MeshSizeY);
     projectm_set_preset_locked(projectM, true);
     projectm_set_soft_cut_duration(projectM, 0.5);
     projectm_set_preset_switch_failed_event_callback(projectM, &SwitchFailedCallback, nullptr);
@@ -449,6 +493,20 @@ int main(int argc, char** argv)
     }
 
     projectm_destroy(projectM);
+
+    size_t loadedPresets = 0;
+    for (const auto& result : results)
+    {
+        loadedPresets += result.switchFailed ? 0 : 1;
+    }
+    std::printf("Warp mesh index buffer uploads: %u for %zu loaded presets\n", g_warpMeshIndexUploads, loadedPresets);
+#ifdef PROJECTM_SMOKE_GLES2
+    if (loadedPresets > 0 && (g_warpMeshIndexUploads == 0 || g_warpMeshIndexUploads > loadedPresets))
+    {
+        std::fprintf(stderr, "FAIL: expected one warp mesh index buffer upload per loaded preset\n");
+        success = false;
+    }
+#endif
 
     glDeleteFramebuffers(1, &targetFramebuffer);
     glDeleteTextures(1, &targetTexture);

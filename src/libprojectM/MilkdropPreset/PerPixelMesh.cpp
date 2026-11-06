@@ -163,14 +163,21 @@ void PerPixelMesh::InitializeMesh(const PresetState& presetState)
         m_warpMesh.Indices().Resize(m_gridSizeX * m_gridSizeY * 6);
     }
     else if (m_viewportWidth == presetState.renderContext.viewportSizeX &&
-             m_viewportHeight == presetState.renderContext.viewportSizeY)
+             m_viewportHeight == presetState.renderContext.viewportSizeY &&
+             m_aspectX == presetState.renderContext.aspectX &&
+             m_aspectY == presetState.renderContext.aspectY)
     {
         // Nothing changed, just go on to the dynamic calculation.
         return;
     }
 
-    const float aspectX = presetState.renderContext.aspectX;
-    const float aspectY = presetState.renderContext.aspectY;
+    m_viewportWidth = presetState.renderContext.viewportSizeX;
+    m_viewportHeight = presetState.renderContext.viewportSizeY;
+    m_aspectX = presetState.renderContext.aspectX;
+    m_aspectY = presetState.renderContext.aspectY;
+
+    const float aspectX = m_aspectX;
+    const float aspectY = m_aspectY;
 
     // Either viewport size or mesh size changed, reinitialize the vertices.
     auto& vertices = m_warpMesh.Vertices();
