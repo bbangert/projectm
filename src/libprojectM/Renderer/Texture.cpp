@@ -109,6 +109,8 @@ auto Texture::CreateVolumeAtlas(std::string name, const void* volumeData, int si
     texture->m_internalFormat = internalFormat;
     texture->m_format = format;
     texture->m_type = type;
+    texture->m_atlasLinearSampler = std::make_shared<Sampler>(GL_CLAMP_TO_EDGE, GL_LINEAR);
+    texture->m_atlasNearestSampler = std::make_shared<Sampler>(GL_CLAMP_TO_EDGE, GL_NEAREST);
 
     glGenTextures(1, &texture->m_textureId);
     texture->Update(volumeData);
@@ -136,7 +138,11 @@ void Texture::Bind(GLint slot, const Sampler::Ptr& sampler) const
     glActiveTexture(GL_TEXTURE0 + slot);
     glBindTexture(m_target, m_textureId);
 
-    if (sampler)
+    if (sampler && m_volumeAtlas)
+    {
+        (sampler->FilterMode() == GL_NEAREST ? m_atlasNearestSampler : m_atlasLinearSampler)->Bind(slot);
+    }
+    else if (sampler)
     {
         sampler->Bind(slot);
     }
