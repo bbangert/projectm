@@ -8,6 +8,7 @@
 #include <Logging.hpp>
 #endif
 
+#include <atomic>
 #include <utility>
 #include <vector>
 
@@ -29,11 +30,10 @@ auto TargetSupported(GLenum target) -> bool
         return true;
     }
 
-    static bool loggedUnsupported = false;
-    if (!loggedUnsupported)
+    static std::atomic<bool> loggedUnsupported{false};
+    if (!loggedUnsupported.exchange(true))
     {
         LOG_WARN("[Texture] Only 2D textures are supported on OpenGL ES 2.0; other targets are left empty.");
-        loggedUnsupported = true;
     }
     return false;
 }

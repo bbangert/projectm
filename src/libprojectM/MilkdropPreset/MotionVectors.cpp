@@ -8,6 +8,7 @@
 #include <Renderer/TextureManager.hpp>
 
 #include <algorithm>
+#include <atomic>
 
 namespace libprojectM {
 namespace MilkdropPreset {
@@ -31,11 +32,10 @@ void MotionVectors::Draw(const PerFrameContext& presetPerFrameContext, std::shar
     // TODO(es2): GLES 2 has no float u/v render target to read the warp offsets back from. The line
     // end points have to come from the warp mesh u/v deltas computed on the CPU.
     static_cast<void>(motionTexture);
-    static bool loggedUnsupported = false;
-    if (!loggedUnsupported)
+    static std::atomic<bool> loggedUnsupported{false};
+    if (!loggedUnsupported.exchange(true))
     {
         LOG_WARN("[MotionVectors] Motion vectors are not implemented on OpenGL ES 2.0 yet and are not drawn.");
-        loggedUnsupported = true;
     }
     return;
 #endif

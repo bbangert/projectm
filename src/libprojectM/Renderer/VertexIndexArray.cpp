@@ -3,6 +3,7 @@
 #ifdef USE_GLES2
 #include <Logging.hpp>
 
+#include <atomic>
 #include <limits>
 #endif
 
@@ -112,11 +113,10 @@ void VertexIndexArray::Update()
     }
     if (overflow)
     {
-        static bool loggedOverflow = false;
-        if (!loggedOverflow)
+        static std::atomic<bool> loggedOverflow{false};
+        if (!loggedOverflow.exchange(true))
         {
             LOG_ERROR("[VertexIndexArray] Vertex index above 65535 can't be drawn with 16-bit indices on OpenGL ES 2.0. Reduce the mesh size.");
-            loggedOverflow = true;
         }
     }
     const void* data = m_uploadIndices.data();
