@@ -92,6 +92,8 @@ add_library(MilkdropPreset OBJECT
         PerPixelMesh.hpp
         PresetFileParser.cpp
         PresetFileParser.hpp
+        PresetShaderTranslator.cpp
+        PresetShaderTranslator.hpp
         PresetState.cpp
         PresetState.hpp
         ShapePerFrameContext.cpp

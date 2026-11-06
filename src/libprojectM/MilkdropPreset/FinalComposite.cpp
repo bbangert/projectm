@@ -1,5 +1,6 @@
 #include "FinalComposite.hpp"
 
+#include "PresetShaderTranslator.hpp"
 #include "PresetState.hpp"
 
 #include <Logging.hpp>
@@ -10,7 +11,6 @@
 namespace libprojectM {
 namespace MilkdropPreset {
 
-static std::string const defaultCompositeShader = "shader_body\n{\nret = tex2D(sampler_main, uv).xyz;\n}";
 
 FinalComposite::FinalComposite()
     : m_compositeMesh(Renderer::VertexBufferUsage::StreamDraw, true, true)
@@ -50,13 +50,13 @@ void FinalComposite::LoadCompositeShader(const PresetState& presetState)
 
                 // Fall back to default shader
                 m_compositeShader = std::make_unique<MilkdropShader>(MilkdropShader::ShaderType::CompositeShader);
-                m_compositeShader->LoadCode(defaultCompositeShader);
+                m_compositeShader->LoadCode(PresetShaderTranslator::DefaultCompositeShader());
             }
         }
         else
         {
             LOG_DEBUG("[FinalComposite] No composite shader code in preset, loading default.");
-            m_compositeShader->LoadCode(defaultCompositeShader);
+            m_compositeShader->LoadCode(PresetShaderTranslator::DefaultCompositeShader());
         }
     }
     else
@@ -88,7 +88,7 @@ void FinalComposite::CompileCompositeShader(PresetState& presetState)
 
             // Fall back to default shader
             m_compositeShader = std::make_unique<MilkdropShader>(MilkdropShader::ShaderType::CompositeShader);
-            m_compositeShader->LoadCode(defaultCompositeShader);
+            m_compositeShader->LoadCode(PresetShaderTranslator::DefaultCompositeShader());
             m_compositeShader->LoadTexturesAndCompile(presetState);
         }
     }

@@ -2,12 +2,14 @@
 
 #include "MilkdropStaticShaders.hpp"
 #include "PresetFileParser.hpp"
+#include "PresetShaderTranslator.hpp"
 
 #include <Renderer/ShaderCache.hpp>
 
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <random>
+#include <utility>
 
 namespace libprojectM {
 namespace MilkdropPreset {
@@ -115,23 +117,9 @@ void PresetState::Initialize(PresetFileParser& parsedFile)
 
     // Versions:
     presetVersion = parsedFile.GetInt("MILKDROP_PRESET_VERSION", presetVersion);
-    if (presetVersion < 200)
-    {
-        // Milkdrop 1.x did not use shaders.
-        warpShaderVersion = 0;
-        compositeShaderVersion = 0;
-    }
-    else if (presetVersion == 200)
-    {
-        // Milkdrop 2.0 only supported a single shader language level variable.
-        warpShaderVersion = parsedFile.GetInt("PSVERSION", warpShaderVersion);
-        compositeShaderVersion = parsedFile.GetInt("PSVERSION", compositeShaderVersion);
-    }
-    else
-    {
-        warpShaderVersion = parsedFile.GetInt("PSVERSION_WARP", warpShaderVersion);
-        compositeShaderVersion = parsedFile.GetInt("PSVERSION_COMP", compositeShaderVersion);
-    }
+    auto shaderSources = PresetShaderTranslator::ReadStageSources(parsedFile);
+    warpShaderVersion = shaderSources.warpVersion;
+    compositeShaderVersion = shaderSources.compositeVersion;
 
     // Code:
     perFrameInitCode = parsedFile.GetCode("per_frame_init_");
@@ -156,8 +144,8 @@ void PresetState::Initialize(PresetFileParser& parsedFile)
     }
 
     // Shader code:
-    warpShader = parsedFile.GetCode("warp_");
-    compositeShader = parsedFile.GetCode("comp_");
+    warpShader = std::move(shaderSources.warpCode);
+    compositeShader = std::move(shaderSources.compositeCode);
 }
 
 void PresetState::LoadShaders()
