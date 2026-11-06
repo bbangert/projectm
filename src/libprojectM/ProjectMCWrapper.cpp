@@ -40,6 +40,42 @@ auto ToCStatus(libprojectM::PresetLoadResult::Status status) -> projectm_preset_
     }
 }
 
+void LogCaughtException(const char* function, const char* what) noexcept
+{
+    using libprojectM::Logging;
+
+    try
+    {
+        LOG_ERROR(std::string(function) + " caught " + (what != nullptr ? std::string("exception: ") + what : std::string("unknown exception")));
+    }
+    catch (...)
+    {
+    }
+}
+
+/**
+ * @brief Calls a preset loading function, logging the exceptions it lets through.
+ *
+ * The load functions report their own failures. This only keeps exceptions from crossing the C
+ * API, e.g. a failed allocation or one thrown by a callback.
+ */
+template<typename Function>
+void CallPresetFunction(const char* name, Function&& function) noexcept
+{
+    try
+    {
+        function();
+    }
+    catch (const std::exception& e)
+    {
+        LogCaughtException(name, e.what());
+    }
+    catch (...)
+    {
+        LogCaughtException(name, nullptr);
+    }
+}
+
 } // namespace
 
 namespace libprojectM {
@@ -166,40 +202,58 @@ void projectm_load_preset_file(projectm_handle instance, const char* filename,
                                bool smooth_transition)
 {
     auto projectMInstance = handle_to_instance(instance);
-    projectMInstance->LoadPresetFile(filename, smooth_transition);
+    CallPresetFunction("projectm_load_preset_file", [&] {
+        projectMInstance->LoadPresetFile(filename, smooth_transition);
+    });
 }
 
 void projectm_load_preset_data(projectm_handle instance, const char* data,
                                bool smooth_transition)
 {
-    std::stringstream presetDataStream(data);
     auto projectMInstance = handle_to_instance(instance);
-    projectMInstance->LoadPresetData(presetDataStream, smooth_transition);
+    CallPresetFunction("projectm_load_preset_data", [&] {
+        std::stringstream presetDataStream(data);
+        projectMInstance->LoadPresetData(presetDataStream, smooth_transition);
+    });
 }
 
 projectm_preset_load_status projectm_preload_preset_file(projectm_handle instance, const char* filename)
 {
     auto projectMInstance = handle_to_instance(instance);
-    return ToCStatus(projectMInstance->PreloadPresetFile(filename).status);
+    auto status = PROJECTM_PRESET_LOAD_OTHER_ERROR;
+    CallPresetFunction("projectm_preload_preset_file", [&] {
+        status = ToCStatus(projectMInstance->PreloadPresetFile(filename).status);
+    });
+    return status;
 }
 
 projectm_preset_load_status projectm_preload_preset_data(projectm_handle instance, const char* data)
 {
-    std::stringstream presetDataStream(data);
     auto projectMInstance = handle_to_instance(instance);
-    return ToCStatus(projectMInstance->PreloadPresetData(presetDataStream).status);
+    auto status = PROJECTM_PRESET_LOAD_OTHER_ERROR;
+    CallPresetFunction("projectm_preload_preset_data", [&] {
+        std::stringstream presetDataStream(data);
+        status = ToCStatus(projectMInstance->PreloadPresetData(presetDataStream).status);
+    });
+    return status;
 }
 
 bool projectm_activate_preloaded_preset(projectm_handle instance, bool smooth_transition)
 {
     auto projectMInstance = handle_to_instance(instance);
-    return projectMInstance->ActivatePreloadedPreset(smooth_transition);
+    bool activated{false};
+    CallPresetFunction("projectm_activate_preloaded_preset", [&] {
+        activated = projectMInstance->ActivatePreloadedPreset(smooth_transition);
+    });
+    return activated;
 }
 
 void projectm_discard_preloaded_preset(projectm_handle instance)
 {
     auto projectMInstance = handle_to_instance(instance);
-    projectMInstance->DiscardPreloadedPreset();
+    CallPresetFunction("projectm_discard_preloaded_preset", [&] {
+        projectMInstance->DiscardPreloadedPreset();
+    });
 }
 
 void projectm_set_preset_load_result_event_callback(projectm_handle instance,

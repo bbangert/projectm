@@ -81,8 +81,9 @@ typedef struct projectm_preset_load_result {
 /**
  * @brief Callback function that is executed after every preset load, successful or not.
  *
- * Called for projectm_load_preset_file(), projectm_load_preset_data() and the preload functions.
- * If the preset could not be loaded at all, this callback is called before the preset switch
+ * Called for projectm_load_preset_file(), projectm_load_preset_data() and the preload functions,
+ * and for projectm_activate_preloaded_preset() if the switch fails. If the preset could not be
+ * loaded at all, or switching to it failed, this callback is called before the preset switch
  * failed callback.
  *
  * The load functions call it after the switch to the loaded preset started, the preload functions

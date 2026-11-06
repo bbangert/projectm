@@ -117,6 +117,24 @@ if(BUILD_TESTING)
             )
     set_tests_properties(projectM-gles-smoke-callback-load PROPERTIES ENVIRONMENT "${_smoke_environment}")
 
+    # A switch that fails, here during a transition, is reported to both callbacks and keeps the
+    # previous preset (white) displayed, and the next load still works.
+    foreach(_mode plain preload)
+        if(_mode STREQUAL "preload")
+            set(_preload_arg --preload)
+        else()
+            set(_preload_arg "")
+        endif()
+        add_test(NAME projectM-gles-smoke-failed-switch-${_mode}
+                COMMAND projectM-gles-smoke --frames 10 --expect-color ffffff --fail-switch 2 ${_preload_arg}
+                ${PROJECTM_SOURCE_DIR}/presets/tests/272-classic-filters.milk
+                ${PROJECTM_SOURCE_DIR}/presets/tests/272-classic-filters.milk
+                ${PROJECTM_SOURCE_DIR}/presets/tests/272-classic-filters.milk
+                ${PROJECTM_SOURCE_DIR}/presets/tests/272-classic-filters.milk
+                )
+        set_tests_properties(projectM-gles-smoke-failed-switch-${_mode} PROPERTIES ENVIRONMENT "${_smoke_environment}")
+    endforeach()
+
     if(USE_GLES2)
         # A preset that fails to load leaves the idle preset rendering. Its mesh upload must not be
         # counted against the valid preset that follows.

@@ -169,9 +169,13 @@ PROJECTM_EXPORT projectm_preset_load_status projectm_preload_preset_data(project
  * Behaves like projectm_load_preset_file() with an already loaded preset: a running transition
  * is finished immediately, then the preloaded preset is blended in or cut to.
  *
+ * If the switch fails, the preloaded preset is discarded, the current preset and any running
+ * transition continue, and the failure is reported to the preset load result callback and the
+ * preset switch failed callback.
+ *
  * @param instance The projectM instance handle.
  * @param smooth_transition If true, the new preset is smoothly blended over.
- * @return False if no preset is preloaded.
+ * @return False if no preset is preloaded or the switch to it failed.
  * @since 4.2.0
  */
 PROJECTM_EXPORT bool projectm_activate_preloaded_preset(projectm_handle instance, bool smooth_transition);

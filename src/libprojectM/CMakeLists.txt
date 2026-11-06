@@ -93,6 +93,14 @@ target_include_directories(projectM_main
         "${MSVC_EXTRA_INCLUDE_DIR}"
         )
 
+if(BUILD_TESTING AND ENABLE_GLES_SMOKE_TEST)
+    # Lets the smoke test force a preset switch failure with PROJECTM_TEST_FAIL_PRESET_SWITCH.
+    target_compile_definitions(projectM_main
+            PRIVATE
+            PROJECTM_TEST_HOOKS
+            )
+endif()
+
 # CMake cannot combine multiple static libraries using target_link_libraries.
 # This syntax will pull in the compiled object files into the final library.
 add_library(projectM

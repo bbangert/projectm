@@ -134,8 +134,9 @@ public:
 
     /**
      * @brief Switches to the preloaded preset.
+     * If the switch fails, the preloaded preset is discarded and the failure is reported.
      * @param smoothTransition True to blend, false for a hard cut.
-     * @return False if no preset is preloaded.
+     * @return False if no preset is preloaded or the switch failed.
      */
     auto ActivatePreloadedPreset(bool smoothTransition) -> bool;
 
@@ -398,7 +399,17 @@ private:
     void WarmUpPreset(Preset& preset);
 
     /**
+     * @brief Switches to an initialized preset, see StartPresetTransition(), catching its errors.
+     * @param preset The initialized preset, destroyed if the switch fails.
+     * @param hardCut True to switch immediately, false to blend.
+     * @param result The load result, changed to an error if the switch fails.
+     * @return True if the switch started.
+     */
+    auto SwitchToPreset(std::unique_ptr<Preset> preset, bool hardCut, PresetLoadResult& result) -> bool;
+
+    /**
      * @brief Switches to an initialized preset.
+     * If it throws, the active and transitioning presets and the transition are unchanged.
      * @param preset The initialized preset.
      * @param hardCut True to switch immediately, false to blend.
      */
@@ -446,6 +457,7 @@ private:
     std::unique_ptr<Preset> m_activePreset;                                       //!< Currently loaded preset.
     std::unique_ptr<Preset> m_transitioningPreset;                                //!< Destination preset when smooth preset switching.
     std::unique_ptr<Preset> m_preloadedPreset;                                    //!< Preset prepared by PreloadPresetFile(), not yet displayed.
+    std::string m_preloadedPresetFilename;                                        //!< The filename of the preloaded preset, empty for preset data.
     std::unique_ptr<Renderer::PresetTransition> m_transition;                     //!< Transition effect used for blending.
     std::unique_ptr<TimeKeeper> m_timeKeeper;                                     //!< Keeps the different timers used to render and switch presets.
     std::unique_ptr<UserSprites::SpriteManager> m_spriteManager;                  //!< Manages all types of user sprites.

@@ -14,7 +14,7 @@
  *                       [--dump <prefix>] [--expect-failure <preset>] [--shader-cache-dir <dir>]
  *                       [--require-cached] [--expect-color <rrggbb>] [--expect-load-status <status>]
  *                       [--preset-list <file>] [--preload] [--hard-cut] [--start-clean]
- *                       [--callback-load <preset.milk>] <preset.milk>...
+ *                       [--callback-load <preset.milk>] [--fail-switch <index>] <preset.milk>...
  *
  * --require-cached fails a preset unless all its shader stages came from the shader cache,
  * --expect-color checks that the last frame is that color, --expect-load-status checks the
@@ -29,6 +29,15 @@
  * bindings, viewport, scissor state and clear color as they were. --hard-cut switches without
  * blending, --start-clean enables projectm_set_preset_start_clean(). With --callback-load, the
  * load result callback of each preset's load loads the given preset with a hard cut.
+ *
+ * --fail-switch makes the switch to the preset at the given zero-based position fail, with the
+ * PROJECTM_TEST_FAIL_PRESET_SWITCH hook of a library built with BUILD_TESTING and
+ * ENABLE_GLES_SMOKE_TEST. That preset is expected to fail like with --expect-failure, except that
+ * its preload succeeds.
+ *
+ * An expected failure must also be reported to the load result callback as "other_error". With
+ * --expect-color, the frames after a failed load must still show the previous preset in that
+ * color, unless no preset was loaded before.
  *
  * On the ES 2 backend, PROJECTM_GLES2_NO_SAMPLER_OBJECTS=1 exercises the per-texture sampler state
  * fallback.
@@ -108,6 +117,7 @@ struct Options
     bool hardCut{false};
     bool startClean{false};
     std::string callbackLoad;
+    int failSwitch{-1};
     std::vector<std::string> presets;
 };
 
@@ -422,6 +432,10 @@ auto ParseOptions(int argc, char** argv, Options& options) -> bool
         {
             options.callbackLoad = next();
         }
+        else if (arg == "--fail-switch")
+        {
+            options.failSwitch = std::atoi(next());
+        }
         else if (arg == "--preset-list")
         {
             const char* listFile = next();
@@ -472,7 +486,7 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "usage: %s [--gbm <device>] [--size WxH] [--frames N] [--texture-path DIR] "
                              "[--dump PREFIX] [--expect-failure PRESET] [--shader-cache-dir DIR] [--require-cached] "
                              "[--expect-color RRGGBB] [--expect-load-status STATUS[:STAGE]] [--preset-list FILE] [--preload] [--hard-cut] "
-                             "[--start-clean] [--callback-load PRESET] preset.milk...\n",
+                             "[--start-clean] [--callback-load PRESET] [--fail-switch INDEX] preset.milk...\n",
                      argv[0]);
         return 2;
     }
@@ -652,6 +666,7 @@ int main(int argc, char** argv)
 
         g_lastLoadResult = LoadResult();
         const bool smooth = presetIndex > 0 && !options.hardCut;
+        const bool failSwitch = static_cast<int>(presetIndex) == options.failSwitch;
         const auto loadStart = std::chrono::steady_clock::now();
         if (options.preload)
         {
@@ -679,14 +694,24 @@ int main(int argc, char** argv)
             glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 
             const auto activateStart = std::chrono::steady_clock::now();
+            if (failSwitch)
+            {
+                setenv("PROJECTM_TEST_FAIL_PRESET_SWITCH", "1", 1);
+            }
             result.activateFailed = !projectm_activate_preloaded_preset(projectM, smooth);
+            unsetenv("PROJECTM_TEST_FAIL_PRESET_SWITCH");
             const auto activateEnd = std::chrono::steady_clock::now();
             result.preloadMs = std::chrono::duration<double, std::milli>(activateStart - loadStart).count();
             result.activateMs = std::chrono::duration<double, std::milli>(activateEnd - activateStart).count();
         }
         else
         {
+            if (failSwitch)
+            {
+                setenv("PROJECTM_TEST_FAIL_PRESET_SWITCH", "1", 1);
+            }
             projectm_load_preset_file(projectM, result.preset.c_str(), smooth);
+            unsetenv("PROJECTM_TEST_FAIL_PRESET_SWITCH");
         }
         result.loadMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - loadStart).count();
         result.switchFailed = g_switchFailures.size() != failuresBefore;
@@ -770,15 +795,26 @@ int main(int argc, char** argv)
         result.meshUploads = g_warpMeshIndexUploads - uploadsBefore;
 
         const std::string baseName = result.preset.substr(result.preset.find_last_of('/') + 1);
-        const bool expectFailure = options.expectFailure.count(baseName) > 0;
+        const bool expectFailure = failSwitch || options.expectFailure.count(baseName) > 0;
         bool ok = result.glErrors == 0 && result.switchFailed == expectFailure && !result.glStateChanged;
         if (options.preload)
         {
-            ok = ok && result.preloadFailed == expectFailure && result.activateFailed == expectFailure;
+            ok = ok && result.preloadFailed == (expectFailure && !failSwitch) && result.activateFailed == expectFailure;
         }
+        if (expectFailure)
+        {
+            ok = ok && result.load.reported && result.load.status == PROJECTM_PRESET_LOAD_OTHER_ERROR;
+        }
+        const bool previousPresetShown = presetIndex > 0 && std::any_of(results.begin(), results.end(), [](const PresetResult& previous) {
+            return !previous.switchFailed;
+        });
         if (!result.switchFailed && !result.activateFailed)
         {
             ok = ok && (options.expectColor ? result.colorMatchFraction > 0.99 : result.nonBlackFraction > 0.001);
+        }
+        else if (options.expectColor && previousPresetShown)
+        {
+            ok = ok && result.colorMatchFraction > 0.99;
         }
         const std::string loadStatus = StatusWithStage(result.load);
         if (!options.expectLoadStatus.empty())
