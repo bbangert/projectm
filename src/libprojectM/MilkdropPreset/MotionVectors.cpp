@@ -1,14 +1,13 @@
 #include "MotionVectors.hpp"
 
 #include "MilkdropStaticShaders.hpp"
+#include "PerPixelWarp.hpp"
 
-#include <Logging.hpp>
 #include <Renderer/BlendMode.hpp>
 #include <Renderer/ShaderCache.hpp>
 #include <Renderer/TextureManager.hpp>
 
 #include <algorithm>
-#include <atomic>
 
 namespace libprojectM {
 namespace MilkdropPreset {
@@ -20,7 +19,11 @@ MotionVectors::MotionVectors(PresetState& presetState)
     m_motionVectorMesh.SetRenderPrimitiveType(Renderer::Mesh::PrimitiveType::Lines);
 }
 
+#ifdef USE_GLES2
+void MotionVectors::Draw(const PerFrameContext& presetPerFrameContext, const PerPixelMesh::WarpUVGrid& warpUVs)
+#else
 void MotionVectors::Draw(const PerFrameContext& presetPerFrameContext, std::shared_ptr<Renderer::Texture> motionTexture)
+#endif
 {
     // Don't draw if invisible.
     if (*presetPerFrameContext.mv_a < 0.0001f)
@@ -29,15 +32,10 @@ void MotionVectors::Draw(const PerFrameContext& presetPerFrameContext, std::shar
     }
 
 #ifdef USE_GLES2
-    // TODO(es2): GLES 2 has no float u/v render target to read the warp offsets back from. The line
-    // end points have to come from the warp mesh u/v deltas computed on the CPU.
-    static_cast<void>(motionTexture);
-    static std::atomic<bool> loggedUnsupported{false};
-    if (!loggedUnsupported.exchange(true))
+    if (warpUVs.uvs == nullptr)
     {
-        LOG_WARN("[MotionVectors] Motion vectors are not implemented on OpenGL ES 2.0 yet and are not drawn.");
+        return;
     }
-    return;
 #endif
 
     int countX = static_cast<int>(*presetPerFrameContext.mv_x);
@@ -75,19 +73,23 @@ void MotionVectors::Draw(const PerFrameContext& presetPerFrameContext, std::shar
     float const inverseHeight = 1.25f / static_cast<float>(m_presetState.renderContext.viewportSizeY);
     float const minimumLength = sqrtf(inverseWidth * inverseWidth + inverseHeight * inverseHeight);
 
+#ifndef USE_GLES2
     m_motionVectorMesh.SetVertexCount(static_cast<std::size_t>(countX + 1) * 2); // countX + 1 lines for each grid row, 2 vertices each.
+#endif
 
     Renderer::BlendMode::Set(true, Renderer::BlendMode::Function::SourceAlpha, Renderer::BlendMode::Function::OneMinusSourceAlpha);
 
     auto shader = GetShader();
     shader->Bind();
     shader->SetUniformMat4x4("vertex_transformation", PresetState::orthogonalProjection);
+#ifndef USE_GLES2
     shader->SetUniformFloat("length_multiplier", static_cast<float>(*presetPerFrameContext.mv_l));
     shader->SetUniformFloat("minimum_length", minimumLength);
 
     shader->SetUniformInt("warp_coordinates", 0);
 
     motionTexture->Bind(0, m_sampler);
+#endif
 
     glVertexAttrib4f(1,
                      static_cast<float>(*presetPerFrameContext.mv_r),
@@ -102,6 +104,70 @@ void MotionVectors::Draw(const PerFrameContext& presetPerFrameContext, std::shar
 
     auto& lineVertices = m_motionVectorMesh.Vertices();
 
+#ifdef USE_GLES2
+    // All rows go into one draw. Each row draws the same lines the ES 3 path's per-row buffer
+    // holds: start points skipped in a row keep the previous row's (or frame's) value, and the
+    // number of lines per row stays at the one of the first row ever drawn.
+    m_rowStartPoints.resize(static_cast<size_t>(countX) + 1);
+    float const lengthMultiplier = static_cast<float>(*presetPerFrameContext.mv_l);
+
+    m_motionVectorMesh.SetVertexCount(static_cast<uint32_t>(static_cast<size_t>(countY) * m_rowStartPoints.size() * 2));
+    size_t vertexCount = 0;
+
+    for (int y = 0; y < countY; y++)
+    {
+        float const posY = (static_cast<float>(y) + 0.25f) / (static_cast<float>(countY) + divertY + 0.25f - 1.0f) - divertY2;
+
+        if (posY > 0.0001f && posY < 0.9999f)
+        {
+            size_t line = 0;
+            for (int x = 0; x < countX; x++)
+            {
+                float const posX = (static_cast<float>(x) + 0.25f) / (static_cast<float>(countX) + divertX + 0.25f - 1.0f) + divertX2;
+
+                if (posX > 0.0001f && posX < 0.9999f)
+                {
+                    m_rowStartPoints[line++] = {posX, posY};
+                }
+            }
+
+            if (m_linesPerRow == 0)
+            {
+                m_linesPerRow = m_rowStartPoints.size();
+            }
+            size_t const linesPerRow = std::min(m_linesPerRow, m_rowStartPoints.size());
+
+            for (line = 0; line < linesPerRow; line++)
+            {
+                auto const& start = m_rowStartPoints[line];
+
+                float oldU{};
+                float oldV{};
+                InterpolateWarpTextureCoordinates(warpUVs.uvs, warpUVs.sizeX, warpUVs.sizeY, start.X(), start.Y(), oldU, oldV);
+
+                float endX{};
+                float endY{};
+                MotionVectorEndPoint(start.X(), start.Y(), oldU, oldV, lengthMultiplier, minimumLength, endX, endY);
+
+                lineVertices[vertexCount++] = start;
+                lineVertices[vertexCount++] = {endX, endY};
+            }
+        }
+    }
+
+    if (vertexCount > 0)
+    {
+        m_motionVectorMesh.SetVertexCount(static_cast<uint32_t>(vertexCount));
+        auto& indices = m_motionVectorMesh.Indices();
+        if (indices.Size() != vertexCount)
+        {
+            indices.Resize(vertexCount);
+            indices.MakeContinuous();
+        }
+        m_motionVectorMesh.Update();
+        m_motionVectorMesh.Draw();
+    }
+#else
     for (int y = 0; y < countY; y++)
     {
         float const posY = (static_cast<float>(y) + 0.25f) / (static_cast<float>(countY) + divertY + 0.25f - 1.0f) - divertY2;
@@ -126,6 +192,7 @@ void MotionVectors::Draw(const PerFrameContext& presetPerFrameContext, std::shar
             m_motionVectorMesh.Draw();
         }
     }
+#endif
 
     Renderer::Mesh::Unbind();
     Renderer::Shader::Unbind();
