@@ -4,12 +4,15 @@
 
 #include <glm/glm.hpp>
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <vector>
 
 using libprojectM::MilkdropPreset::InterpolateWarpTextureCoordinates;
 using libprojectM::MilkdropPreset::MotionVectorEndPoint;
 using libprojectM::MilkdropPreset::WarpFrameParameters;
+using libprojectM::MilkdropPreset::WarpMeshTriangleIndices;
 using libprojectM::MilkdropPreset::WarpOffsetTable;
 using libprojectM::MilkdropPreset::WarpZoom;
 using libprojectM::MilkdropPreset::WarpTextureCoordinates;
@@ -109,6 +112,49 @@ auto MakeMeshUVs(const WarpFrameParameters& frame, const WarpVertexParameters& v
         }
     }
     return uvs;
+}
+
+/**
+ * What the warp pass rasterizes at a point: the u/v of the mesh triangle containing it, from the
+ * triangle list PerPixelMesh draws, interpolated with barycentric weights.
+ */
+auto RasterizedTriangleReference(const std::vector<Point>& uvs, int gridX, int gridY, double x, double y,
+                                 glm::dvec2& uv) -> bool
+{
+    std::vector<uint32_t> indices(static_cast<size_t>(gridX) * gridY * 6);
+    WarpMeshTriangleIndices(gridX, gridY, indices);
+
+    const glm::dvec2 point(x * gridX, y * gridY);
+    for (size_t triangle = 0; triangle < indices.size(); triangle += 3)
+    {
+        glm::dvec2 corners[3];
+        for (int corner = 0; corner < 3; corner++)
+        {
+            const auto index = static_cast<int>(indices[triangle + corner]);
+            corners[corner] = glm::dvec2(index % (gridX + 1), index / (gridX + 1));
+        }
+
+        auto edge = [](glm::dvec2 a, glm::dvec2 b, glm::dvec2 p) {
+            return (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+        };
+        const double area = edge(corners[0], corners[1], corners[2]);
+        const double weights[3] = {edge(corners[1], corners[2], point) / area,
+                                   edge(corners[2], corners[0], point) / area,
+                                   edge(corners[0], corners[1], point) / area};
+        if (weights[0] < -1e-9 || weights[1] < -1e-9 || weights[2] < -1e-9)
+        {
+            continue;
+        }
+
+        uv = {};
+        for (int corner = 0; corner < 3; corner++)
+        {
+            const auto& cornerUV = uvs[indices[triangle + corner]];
+            uv += weights[corner] * glm::dvec2(cornerUV.X(), cornerUV.Y());
+        }
+        return true;
+    }
+    return false;
 }
 
 auto TestFrames() -> std::vector<WarpFrameParameters>
@@ -248,7 +294,7 @@ TEST(PerPixelWarp, IdentityMeshTracesBackToTheSamePosition)
 TEST(PerPixelWarp, InterpolationIsExactForAffineMeshes)
 {
     // Zoom, rotation and translation without warp or zoom exponent give an affine u/v field,
-    // which bilinear interpolation reproduces exactly between the grid points.
+    // which interpolating within the mesh triangles reproduces exactly between the grid points.
     const auto frame = MakeFrame(0.5625f, 1.0f, 3.0f, 1.0f, 0.0f);
     WarpVertexParameters vertex;
     vertex.zoom = 1.1f;
@@ -274,6 +320,82 @@ TEST(PerPixelWarp, InterpolationIsExactForAffineMeshes)
             EXPECT_NEAR(u, expectedU, 1e-5);
             EXPECT_NEAR(v, expectedV, 1e-5);
         }
+    }
+}
+
+TEST(PerPixelWarp, InterpolationMatchesTheRasterizedMeshTriangles)
+{
+    // Warp, zoom exponent and per-vertex noise make the u/v field non-affine within each cell, so
+    // the two triangles of a cell interpolate differently than a bilinear blend of its corners.
+    constexpr int gridX = 8;
+    constexpr int gridY = 6;
+    const auto frame = MakeFrame(0.5625f, 1.0f, 12.5f, 0.4f, 0.0f);
+    auto uvs = MakeMeshUVs(frame, TestVertices()[3], gridX, gridY);
+    for (size_t vertex = 0; vertex < uvs.size(); vertex++)
+    {
+        const auto noise = static_cast<float>((vertex * 7919) % 101) / 101.0f - 0.5f;
+        uvs[vertex] = {uvs[vertex].X() + 0.05f * noise, uvs[vertex].Y() - 0.03f * noise};
+    }
+
+    double largestBilinearDifference = 0.0;
+    constexpr int samples = 97;
+    for (int sampleY = 0; sampleY <= samples; sampleY++)
+    {
+        for (int sampleX = 0; sampleX <= samples; sampleX++)
+        {
+            const float x = static_cast<float>(sampleX) / samples;
+            const float y = static_cast<float>(sampleY) / samples;
+
+            glm::dvec2 reference;
+            ASSERT_TRUE(RasterizedTriangleReference(uvs, gridX, gridY, x, y, reference)) << "point " << x << "," << y;
+
+            float u{};
+            float v{};
+            InterpolateWarpTextureCoordinates(uvs.data(), gridX, gridY, x, y, u, v);
+            ASSERT_NEAR(u, reference.x, 1e-5) << "point " << x << "," << y;
+            ASSERT_NEAR(v, reference.y, 1e-5) << "point " << x << "," << y;
+
+            // Bilinear interpolation over the cell's corners, to show the field is non-affine.
+            const float gridPosX = x * gridX;
+            const float gridPosY = y * gridY;
+            const int x0 = std::min(static_cast<int>(gridPosX), gridX - 1);
+            const int y0 = std::min(static_cast<int>(gridPosY), gridY - 1);
+            const float fractionX = gridPosX - static_cast<float>(x0);
+            const float fractionY = gridPosY - static_cast<float>(y0);
+            const auto corner = [&](int cornerX, int cornerY) { return uvs[cornerY * (gridX + 1) + cornerX].X(); };
+            const float bilinearU = (corner(x0, y0) * (1.0f - fractionX) + corner(x0 + 1, y0) * fractionX) * (1.0f - fractionY) +
+                                    (corner(x0, y0 + 1) * (1.0f - fractionX) + corner(x0 + 1, y0 + 1) * fractionX) * fractionY;
+            largestBilinearDifference = std::max(largestBilinearDifference, std::abs(bilinearU - reference.x));
+        }
+    }
+
+    EXPECT_GT(largestBilinearDifference, 1e-3);
+}
+
+TEST(PerPixelWarp, MeshTrianglesCoverEachCellOnce)
+{
+    constexpr int gridX = 6;
+    constexpr int gridY = 4;
+    std::vector<uint32_t> indices(gridX * gridY * 6);
+    WarpMeshTriangleIndices(gridX, gridY, indices);
+
+    std::vector<int> cellTriangles(gridX * gridY);
+    for (size_t triangle = 0; triangle < indices.size(); triangle += 3)
+    {
+        int cellX = gridX;
+        int cellY = gridY;
+        for (size_t corner = triangle; corner < triangle + 3; corner++)
+        {
+            cellX = std::min(cellX, static_cast<int>(indices[corner] % (gridX + 1)));
+            cellY = std::min(cellY, static_cast<int>(indices[corner] / (gridX + 1)));
+        }
+        ASSERT_LT(cellX, gridX);
+        ASSERT_LT(cellY, gridY);
+        cellTriangles[cellY * gridX + cellX]++;
+    }
+    for (int count : cellTriangles)
+    {
+        EXPECT_EQ(count, 2);
     }
 }
 

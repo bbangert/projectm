@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <vector>
 
 namespace libprojectM {
@@ -251,14 +252,66 @@ private:
 };
 
 /**
- * @brief Bilinearly interpolates the warp mesh texture coordinates at a point.
+ * @brief Writes the triangle list of the warp mesh, six indices per mesh cell.
  *
- * This is the CPU equivalent of sampling the u/v map the warp pass renders, at the motion vector
- * position (x, 1 - y), which Milkdrop called ReversePropagatePoint().
+ * Cell (x, y) with the lower-left vertex v = x + y * (gridX + 1) is split into the triangles
+ * (v, v + 1, v + gridX + 1) and (v + 1, v + gridX + 1, v + gridX + 2), so all cells share the
+ * diagonal from vertex (x + 1, y) to vertex (x, y + 1). InterpolateWarpTextureCoordinates() relies
+ * on this split. The cells are listed per quadrant, each from its outer corner towards the center.
  *
- * @param uvs The (gridX + 1) * (gridY + 1) mesh texture coordinates, row by row, starting at mesh Y = -1.
  * @param gridX The number of mesh cells horizontally.
  * @param gridY The number of mesh cells vertically.
+ * @param indices Receives gridX * gridY * 6 indices, must support operator[] with that many elements.
+ */
+template<typename IndexArray>
+inline void WarpMeshTriangleIndices(int gridX, int gridY, IndexArray& indices)
+{
+    int index{0};
+    for (int quadrant = 0; quadrant < 4; quadrant++)
+    {
+        for (int slice = 0; slice < gridY / 2; slice++)
+        {
+            for (int cellX = 0; cellX < gridX / 2; cellX++)
+            {
+                int xReference = cellX;
+                int yReference = slice;
+
+                if ((quadrant & 1) != 0)
+                {
+                    xReference = gridX - 1 - xReference;
+                }
+                if ((quadrant & 2) != 0)
+                {
+                    yReference = gridY - 1 - yReference;
+                }
+
+                const int vertex = xReference + yReference * (gridX + 1);
+
+                // 0 - 1      3
+                //   /      /
+                // 2      4 - 5
+                indices[index++] = static_cast<uint32_t>(vertex);
+                indices[index++] = static_cast<uint32_t>(vertex + 1);
+                indices[index++] = static_cast<uint32_t>(vertex + gridX + 1);
+                indices[index++] = static_cast<uint32_t>(vertex + 1);
+                indices[index++] = static_cast<uint32_t>(vertex + gridX + 1);
+                indices[index++] = static_cast<uint32_t>(vertex + gridX + 2);
+            }
+        }
+    }
+}
+
+/**
+ * @brief Interpolates the warp mesh texture coordinates at a point like the warp pass rasterizes them.
+ *
+ * This is the CPU equivalent of sampling the u/v map the warp pass renders, at the motion vector
+ * position (x, 1 - y), which Milkdrop called ReversePropagatePoint(). The warp pass draws each mesh
+ * cell as the two triangles of WarpMeshTriangleIndices(), so the coordinates are interpolated
+ * linearly within the triangle containing the point, not bilinearly over the cell.
+ *
+ * @param uvs The (gridX + 1) * (gridY + 1) mesh texture coordinates, row by row, starting at mesh Y = -1.
+ * @param gridX The number of mesh cells horizontally, at least 1.
+ * @param gridY The number of mesh cells vertically, at least 1.
  * @param x The X position, 0..1.
  * @param y The Y position, 0..1, top-down as the motion vectors are laid out.
  * @param[out] u The interpolated U coordinate.
@@ -269,22 +322,31 @@ inline void InterpolateWarpTextureCoordinates(const Renderer::Point* uvs, int gr
 {
     const float gridPosX = std::min(std::max(x, 0.0f), 1.0f) * static_cast<float>(gridX);
     const float gridPosY = std::min(std::max(y, 0.0f), 1.0f) * static_cast<float>(gridY);
-    const int x0 = std::min(static_cast<int>(gridPosX), gridX);
-    const int y0 = std::min(static_cast<int>(gridPosY), gridY);
-    const int x1 = std::min(x0 + 1, gridX);
-    const int y1 = std::min(y0 + 1, gridY);
+    const int x0 = std::min(static_cast<int>(gridPosX), gridX - 1);
+    const int y0 = std::min(static_cast<int>(gridPosY), gridY - 1);
     const float fractionX = gridPosX - static_cast<float>(x0);
     const float fractionY = gridPosY - static_cast<float>(y0);
 
     const int stride = gridX + 1;
     const Renderer::Point& p00 = uvs[y0 * stride + x0];
-    const Renderer::Point& p10 = uvs[y0 * stride + x1];
-    const Renderer::Point& p01 = uvs[y1 * stride + x0];
-    const Renderer::Point& p11 = uvs[y1 * stride + x1];
+    const Renderer::Point& p10 = uvs[y0 * stride + x0 + 1];
+    const Renderer::Point& p01 = uvs[(y0 + 1) * stride + x0];
+    const Renderer::Point& p11 = uvs[(y0 + 1) * stride + x0 + 1];
 
-    const float top = 1.0f - fractionY;
-    u = (p00.X() * (1.0f - fractionX) + p10.X() * fractionX) * top + (p01.X() * (1.0f - fractionX) + p11.X() * fractionX) * fractionY;
-    v = (p00.Y() * (1.0f - fractionX) + p10.Y() * fractionX) * top + (p01.Y() * (1.0f - fractionX) + p11.Y() * fractionX) * fractionY;
+    if (fractionX + fractionY <= 1.0f)
+    {
+        // Triangle (x0, y0), (x0 + 1, y0), (x0, y0 + 1)
+        u = p00.X() + (p10.X() - p00.X()) * fractionX + (p01.X() - p00.X()) * fractionY;
+        v = p00.Y() + (p10.Y() - p00.Y()) * fractionX + (p01.Y() - p00.Y()) * fractionY;
+    }
+    else
+    {
+        // Triangle (x0 + 1, y0), (x0, y0 + 1), (x0 + 1, y0 + 1)
+        const float inverseX = 1.0f - fractionX;
+        const float inverseY = 1.0f - fractionY;
+        u = p11.X() + (p01.X() - p11.X()) * inverseX + (p10.X() - p11.X()) * inverseY;
+        v = p11.Y() + (p01.Y() - p11.Y()) * inverseX + (p10.Y() - p11.Y()) * inverseY;
+    }
 }
 
 /**

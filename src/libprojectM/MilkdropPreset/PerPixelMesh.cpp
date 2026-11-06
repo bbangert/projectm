@@ -206,39 +206,7 @@ void PerPixelMesh::InitializeMesh(const PresetState& presetState)
     }
 
     // Generate triangle lists for drawing the main warp mesh
-    int vertexListIndex{0};
-    for (int quadrant = 0; quadrant < 4; quadrant++)
-    {
-        for (int slice = 0; slice < m_gridSizeY / 2; slice++)
-        {
-            for (int gridX = 0; gridX < m_gridSizeX / 2; gridX++)
-            {
-                int xReference = gridX;
-                int yReference = slice;
-
-                if ((quadrant & 1) != 0)
-                {
-                    xReference = m_gridSizeX - 1 - xReference;
-                }
-                if ((quadrant & 2) != 0)
-                {
-                    yReference = m_gridSizeY - 1 - yReference;
-                }
-
-                int const vertex = xReference + yReference * (m_gridSizeX + 1);
-
-                // 0 - 1      3
-                //   /      /
-                // 2      4 - 5
-                m_warpMesh.Indices()[vertexListIndex++] = vertex;
-                m_warpMesh.Indices()[vertexListIndex++] = vertex + 1;
-                m_warpMesh.Indices()[vertexListIndex++] = vertex + m_gridSizeX + 1;
-                m_warpMesh.Indices()[vertexListIndex++] = vertex + 1;
-                m_warpMesh.Indices()[vertexListIndex++] = vertex + m_gridSizeX + 1;
-                m_warpMesh.Indices()[vertexListIndex++] = vertex + m_gridSizeX + 2;
-            }
-        }
-    }
+    WarpMeshTriangleIndices(m_gridSizeX, m_gridSizeY, m_warpMesh.Indices());
 
 #ifdef USE_GLES2
     // Positions, rad/ang and indices only change here, so they're uploaded once instead of per frame.
