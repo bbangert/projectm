@@ -80,6 +80,7 @@ if(BUILD_TESTING)
             "${PROJECTM_SOURCE_DIR}/presets/tests/110-per_pixel.milk"
             "${PROJECTM_SOURCE_DIR}/presets/tests/200-wave.milk"
             "${PROJECTM_SOURCE_DIR}/presets/tests/270-warpcomp-shaders.milk"
+            "${PROJECTM_SOURCE_DIR}/presets/tests/271-shader-textures.milk"
             "${PROJECTM_SOURCE_DIR}/presets/tests/250-wavecode.milk"
             "${PROJECTM_SOURCE_DIR}/presets/tests/100-square.milk"
             )
@@ -106,5 +107,23 @@ if(BUILD_TESTING)
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/CompareSamplerFallback.cmake
                 )
         set_tests_properties(projectM-gles2-sampler-fallback PROPERTIES ENVIRONMENT "${_smoke_environment}")
+    endif()
+
+    if(BUILD_TRANSLATOR_HARNESS)
+        set(_cache_presets
+                "${PROJECTM_SOURCE_DIR}/presets/tests/270-warpcomp-shaders.milk"
+                "${PROJECTM_SOURCE_DIR}/presets/tests/271-shader-textures.milk"
+                )
+        add_test(NAME projectM-shader-cache
+                COMMAND ${CMAKE_COMMAND}
+                "-DPRETRANSLATE=$<TARGET_FILE:projectM-pretranslate-presets>"
+                "-DSMOKE=$<TARGET_FILE:projectM-gles-smoke>"
+                "-DPRESETS=${_cache_presets}"
+                "-DALTERED_PRESET=${PROJECTM_SOURCE_DIR}/presets/tests/270-warpcomp-shaders.milk"
+                "-DTEXTURE=${PROJECTM_SOURCE_DIR}/background.png"
+                "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/shader-cache-test"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/ShaderCacheTest.cmake"
+                )
+        set_tests_properties(projectM-shader-cache PROPERTIES ENVIRONMENT "${_smoke_environment}")
     endif()
 endif()
