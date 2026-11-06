@@ -9,8 +9,8 @@
 // a missing random texture makes the runtime key differ, which only costs a translation.
 //
 // Prints one TSV row per stage: path (relative to its preset dir), stage, status (ok|err), key,
-// error message. Exits 1 if a preset directory can't be fully read or a file can't be written,
-// 2 on usage errors.
+// error message. Exits 1 if a preset directory or preset file can't be read or a shader file can't
+// be written, 2 on usage errors.
 
 #include "MilkdropPreset/PresetFileParser.hpp"
 #include "MilkdropPreset/PresetShaderTranslator.hpp"
@@ -129,13 +129,21 @@ public:
         return written;
     }
 
+    // Returns false if the preset file can't be read or a GLSL file can't be written.
     auto Preset(const PresetFile& preset) -> bool
     {
         PresetFileParser parser;
-        if (!parser.Read(preset.path.string()))
+        std::ifstream stream(preset.path, std::ios::in | std::ios::binary);
+        if (!stream || !parser.Read(stream))
         {
-            std::cout << preset.displayPath << "\twarp\terr\t\tcannot read preset\n";
-            return true;
+            // A readable file is only rejected if it's too large, as by the runtime.
+            bool const unreadable = !stream;
+            std::cout << preset.displayPath << "\twarp\terr\t\t" << (unreadable ? "cannot read preset" : "cannot parse preset") << "\n";
+            if (unreadable)
+            {
+                std::cerr << "cannot read " << preset.path.string() << "\n";
+            }
+            return !unreadable;
         }
 
         auto const sources = Translator::ReadStageSources(parser);
