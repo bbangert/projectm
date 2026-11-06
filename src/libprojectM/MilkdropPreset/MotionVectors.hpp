@@ -56,6 +56,7 @@ private:
 #ifdef USE_GLES2
     std::vector<Renderer::Point> m_rowStartPoints; //!< Line start points of the current row, kept between rows and frames like the ES 3 path's per-row line buffer.
     size_t m_linesPerRow{};                        //!< Lines drawn per row, fixed by the first draw like the ES 3 path's index buffer.
+    std::vector<float> m_columnPositions;          //!< X positions of the lines inside the viewport.
 #endif
 
     std::weak_ptr<Renderer::Shader> m_motionVectorShader;                                                           //!< The motion vector shader, calculates the trace positions in the GPU.

@@ -109,9 +109,22 @@ void MotionVectors::Draw(const PerFrameContext& presetPerFrameContext, std::shar
     // holds: start points skipped in a row keep the previous row's (or frame's) value, and the
     // number of lines per row stays at the one of the first row ever drawn.
     m_rowStartPoints.resize(static_cast<size_t>(countX) + 1);
+    m_columnPositions.clear();
+    for (int x = 0; x < countX; x++)
+    {
+        float const posX = (static_cast<float>(x) + 0.25f) / (static_cast<float>(countX) + divertX + 0.25f - 1.0f) + divertX2;
+
+        if (posX > 0.0001f && posX < 0.9999f)
+        {
+            m_columnPositions.push_back(posX);
+        }
+    }
+
     float const lengthMultiplier = static_cast<float>(*presetPerFrameContext.mv_l);
 
     m_motionVectorMesh.SetVertexCount(static_cast<uint32_t>(static_cast<size_t>(countY) * m_rowStartPoints.size() * 2));
+    Renderer::Point* const vertices = lineVertices.Get().data();
+    Renderer::Point* const rowStartPoints = m_rowStartPoints.data();
     size_t vertexCount = 0;
 
     for (int y = 0; y < countY; y++)
@@ -120,15 +133,9 @@ void MotionVectors::Draw(const PerFrameContext& presetPerFrameContext, std::shar
 
         if (posY > 0.0001f && posY < 0.9999f)
         {
-            size_t line = 0;
-            for (int x = 0; x < countX; x++)
+            for (size_t line = 0; line < m_columnPositions.size(); line++)
             {
-                float const posX = (static_cast<float>(x) + 0.25f) / (static_cast<float>(countX) + divertX + 0.25f - 1.0f) + divertX2;
-
-                if (posX > 0.0001f && posX < 0.9999f)
-                {
-                    m_rowStartPoints[line++] = {posX, posY};
-                }
+                rowStartPoints[line] = {m_columnPositions[line], posY};
             }
 
             if (m_linesPerRow == 0)
@@ -137,9 +144,9 @@ void MotionVectors::Draw(const PerFrameContext& presetPerFrameContext, std::shar
             }
             size_t const linesPerRow = std::min(m_linesPerRow, m_rowStartPoints.size());
 
-            for (line = 0; line < linesPerRow; line++)
+            for (size_t line = 0; line < linesPerRow; line++)
             {
-                auto const& start = m_rowStartPoints[line];
+                auto const& start = rowStartPoints[line];
 
                 float oldU{};
                 float oldV{};
@@ -149,8 +156,8 @@ void MotionVectors::Draw(const PerFrameContext& presetPerFrameContext, std::shar
                 float endY{};
                 MotionVectorEndPoint(start.X(), start.Y(), oldU, oldV, lengthMultiplier, minimumLength, endX, endY);
 
-                lineVertices[vertexCount++] = start;
-                lineVertices[vertexCount++] = {endX, endY};
+                vertices[vertexCount++] = start;
+                vertices[vertexCount++] = {endX, endY};
             }
         }
     }
@@ -158,13 +165,17 @@ void MotionVectors::Draw(const PerFrameContext& presetPerFrameContext, std::shar
     if (vertexCount > 0)
     {
         m_motionVectorMesh.SetVertexCount(static_cast<uint32_t>(vertexCount));
+        m_motionVectorMesh.Bind();
+        lineVertices.Update();
+
+        // The lines are drawn in order, so the indices only change with the line count.
         auto& indices = m_motionVectorMesh.Indices();
         if (indices.Size() != vertexCount)
         {
             indices.Resize(vertexCount);
             indices.MakeContinuous();
+            indices.Update();
         }
-        m_motionVectorMesh.Update();
         m_motionVectorMesh.Draw();
     }
 #else
