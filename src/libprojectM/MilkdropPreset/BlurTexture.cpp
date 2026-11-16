@@ -270,7 +270,12 @@ void BlurTexture::Update(const Renderer::Texture& sourceTexture, const PerFrameC
         // Draw fullscreen quad
         m_blurMesh.Draw();
 
-        // Save to blur texture
+        // Save to blur texture. The copy reads a sub-rectangle of the larger blur framebuffer. Mesa
+        // v3d folds a copy from a not yet submitted job into that job's tile stores, and those store
+        // whole tiles of the framebuffer into the smaller texture, past the end of its memory (GPU
+        // faults, hangs and corruption of unrelated buffers). Submitting the draw first makes the
+        // copy a blit of its own, clipped to the texture.
+        glFlush();
         m_blurTextures[pass]->Bind(0);
         glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, m_blurTextures[pass]->Width(), m_blurTextures[pass]->Height());
         m_blurTextures[pass]->Unbind(0);
